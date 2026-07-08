@@ -5,7 +5,7 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:5ae97fb8e43260dcc899d4eb11e15677d6621bbf869fb92a4d1d0f850b9a720b"
+content_hash = "sha256:9f919a8f22e1cea8dc09f6790ed1d3bd286f3ba3b94c14e71991e40e9e25de36"
 
 [[metadata.targets]]
 requires_python = ">=3.10"
@@ -659,7 +659,7 @@ name = "platformdirs"
 version = "4.10.0"
 requires_python = ">=3.10"
 summary = "A small Python package for determining appropriate platform-specific dirs, e.g. a `user data dir`."
-groups = ["dev"]
+groups = ["default", "dev"]
 files = [
     {file = "platformdirs-4.10.0-py3-none-any.whl", hash = "sha256:fb516cdb12eb0d857d0cd85a7c57cea4d060bee4578d6cf5a14dfdf8cbf8784a"},
     {file = "platformdirs-4.10.0.tar.gz", hash = "sha256:31e761a6a0ca04faf7353ea759bdba55652be214725111e5aac52dfa29d4bef7"},

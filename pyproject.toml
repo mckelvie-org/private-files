@@ -4,7 +4,7 @@ build-backend = "pdm.backend"
 
 [project]
 name = "private-files"
-version = "0.0.0-dev.1"
+version = "1.0.0-dev.1"
 description = "Manage secret/private files in an os-independent way"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -12,7 +12,18 @@ requires-python = ">=3.10"
 authors = [
   { name = "Sam McKelvie", email = "dev@mckelvie.org" },
 ]
-keywords = []
+keywords = [
+  "private",
+  "secrets",
+  "credentials",
+  "security",
+  "permissions",
+  "config",
+  "cross-platform",
+  "filesystem",
+  "dotfiles",
+  "application-data",
+]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
@@ -24,10 +35,14 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
+  "Topic :: Security",
+  "Topic :: System :: Filesystems",
   "Topic :: Software Development :: Libraries :: Python Modules",
   "Typing :: Typed",
 ]
-dependencies = []
+dependencies = [
+  "platformdirs>=4.0.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/mckelvie-org/private-files"
