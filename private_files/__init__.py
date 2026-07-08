@@ -7,9 +7,10 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from functools import cache
 from pathlib import Path
-from typing import IO, Any, BinaryIO, Final, Literal, TextIO, TypeAlias, overload
+from typing import IO, Any, BinaryIO, Final, Literal, ParamSpec, Protocol, TextIO, TypeAlias, TypeVar, cast, overload
 
 from platformdirs import user_data_dir
 
@@ -48,7 +49,17 @@ OpenBinaryMode: TypeAlias = Literal[
 ]
 """Mode strings for open() calls that produce a BinaryIO."""
 
-@cache
+P = ParamSpec("P")
+T = TypeVar("T", covariant=True)
+
+class _CachedFunction(Protocol[P, T]):
+    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> T: ...
+    def cache_clear(self) -> None: ...
+
+def _typed_cache(func: Callable[P, T]) -> _CachedFunction[P, T]:
+    return cast("_CachedFunction[P, T]", cache(func))
+
+@_typed_cache
 def get_shared_private_dir() -> Path:
     """Get the name of the shared user-wide private root directory for storing sensitive data like authentication tokens.
     On linux and macos, this will be ~/.private, which the user can choose to encrypt or protect as needed.
@@ -65,7 +76,7 @@ def get_shared_private_dir() -> Path:
         # On Linux and MacOS, use ~/.private, which the user can choose to encrypt or protect as needed
         return UNIX_PRIVATE_DIR_ROOT_PATH.expanduser().resolve()
 
-@cache
+@_typed_cache
 def create_shared_private_dir() -> Path:
     """Create and return the shared user-wide private root directory for storing sensitive data like authentication tokens,
     if it does not already exist. On linux and macos, this will be ~/.private, which the user can choose to encrypt or protect as needed.
@@ -375,7 +386,7 @@ class PrivateFilesManager:
             raise
         return f
 
-@cache
+@_typed_cache
 def get_private_files_manager(app_name: str | None = None) -> PrivateFilesManager:
     """Get a cached PrivateFilesManager instance for the given application name."""
     return PrivateFilesManager(app_name=app_name)

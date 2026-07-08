@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## [1.0.1]
+
+### Changed
+
+- Collapsed the ~27 individual `Literal[...]`-mode overloads on `open_private_app_file()` /
+  `PrivateFilesManager.open()` down to two, backed by new public `OpenTextMode` / `OpenBinaryMode`
+  type aliases. Fixes several mode strings (e.g. `"xt"`, `"wt+"`, `"at+"`) that were silently
+  missing from the old, hand-written overload list.
+- Cached functions (`get_shared_private_dir`, `create_shared_private_dir`,
+  `get_private_files_manager`) now preserve their real call signature under static type checking;
+  previously `@functools.cache` erased parameter names/types in favor of a generic
+  `(*args: Hashable, **kwargs: Hashable)` signature.
+
 ## [1.0.0]
 
 Initial release of `private-files`.
