@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 1.0.1 (unreleased)
+
+- _Add release notes here._
+
 ## [1.0.1]
 
 ### Changed
