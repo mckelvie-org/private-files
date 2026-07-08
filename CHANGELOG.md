@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 1.0.0 (unreleased)
+
+- _Add release notes here._
+
 ## [1.0.0]
 
 Initial release of `private-files`.
