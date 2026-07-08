@@ -1,0 +1,277 @@
+#!/usr/bin/env python3
+"""
+This script initializes template variables in .template-vars.json, and applies template
+variables to various files in the project for initial setup of a new project.
+
+This script should remain compatible with the system Python 3.9 so it can run before
+a virtualenv is set up.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import re
+import subprocess
+from argparse import ArgumentParser
+from datetime import datetime
+from pathlib import Path
+from string import Template
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    # typing.TypeAlias requires Python 3.10+; this script must also run under the
+    # system Python 3.9 that bootstraps the project before a venv exists, so the
+    # import is type-checking-only (annotations are never evaluated at runtime,
+    # since `from __future__ import annotations` is in effect).
+    from typing import TypeAlias
+
+TEMPLATE_VARS_APPLIED_FILE = ".template-vars-applied"
+TEMPLATE_VARS_FILE = ".template-vars.json"
+PYDEV_CONFIG_FILE = "~/.config/pydev/config.json"
+TEST_TEMPLATE_FILE = "tests/test_template.py"
+
+templated_files: list[str] = [
+        "pyproject.toml",
+        "README.md",
+        "CONTRIBUTING.md",
+        "CHANGELOG.md",
+    ]
+
+TemplateVars: TypeAlias = dict[str, str]
+
+script_dir = Path(__file__).parent.resolve()
+project_dir = script_dir.parent.resolve()
+
+os.chdir(project_dir)
+
+def parse_github_owner_from_remote_url(remote_url: str) -> str:
+    """Extract the owner/org name from a git remote URL. Handles HTTPS/ssh:// URLs
+    (owner is the parent path segment) as well as scp-like ssh syntax
+    (e.g. git@github.com:owner/repo.git), which pathlib can't parse since it
+    doesn't treat the host:path colon as a separator."""
+    url = remote_url.strip()
+    if url.endswith(".git"):
+        url = url[:-4]
+    match = re.match(r"^(?:[^@/]+@)?[^/:]+:(?P<owner>[^/]+)/[^/]+$", url)
+    if match:
+        return match.group("owner")
+    return Path(url).parent.name
+
+def input_with_default(prompt: str, default: str | None=None) -> str:
+    """Prompt the user for input, providing a default value."""
+    if default is None:
+        user_input = input(f"{prompt}: ").strip()
+    else:
+        user_input = input(f"{prompt} [{default}]: ").strip()
+        if not user_input:
+            user_input = default
+    return user_input
+
+template_vars_applied_file = project_dir / os.path.expanduser(TEMPLATE_VARS_APPLIED_FILE)
+pydev_config_file = project_dir / os.path.expanduser(PYDEV_CONFIG_FILE)
+template_vars_file = project_dir / os.path.expanduser(TEMPLATE_VARS_FILE)
+test_template_file = project_dir / os.path.expanduser(TEST_TEMPLATE_FILE)
+
+if pydev_config_file.exists():
+    with open(pydev_config_file) as f:
+        pydev_config = json.load(f)
+else:
+    pydev_config = {}
+
+template_vars: TemplateVars
+tv_dirty: bool = False
+tv_initialized: bool = False
+if template_vars_file.exists():
+    with open(template_vars_file) as f:
+        template_vars = json.load(f)
+else:
+    template_vars = {}
+    tv_dirty = True
+    
+def flush_template_vars():
+    """Flush the template variables to the .template-vars.json file."""
+    global tv_dirty
+    if tv_dirty:
+        with open(template_vars_file, "w") as f:
+            json.dump(template_vars, f, indent=2, sort_keys=True)
+        tv_dirty = False
+    
+def get_template_vars(force_init: bool = False) -> TemplateVars:
+    global tv_dirty, tv_initialized
+    
+    if tv_initialized and not force_init:
+        return template_vars
+        
+    author_name = template_vars.get("AUTHOR_NAME")
+    if author_name is None:
+        author_name = pydev_config.get("authorName")
+        if author_name is None:
+            author_name = subprocess.run(
+                ["git", "config", "--global", "user.name"],
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            if author_name == "":
+                author_name = None
+        template_vars["AUTHOR_NAME"] = input_with_default("Enter the author's name", author_name)
+        tv_dirty = True
+        
+    author_email = template_vars.get("AUTHOR_EMAIL")
+    if author_email is None:
+        author_email = pydev_config.get("authorEmail")
+        if author_email is None:
+            author_email = subprocess.run(
+                ["git", "config", "--global", "user.email"],
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            if author_email == "":
+                author_email = None
+        template_vars["AUTHOR_EMAIL"] = input_with_default("Enter the author's email", author_email)
+        tv_dirty = True
+        
+    project_description = template_vars.get("PROJECT_DESCRIPTION")
+    if project_description is None:
+        project_description_json = subprocess.run(
+            ["gh", "repo", "view", "--json", "description"],
+            capture_output=True,
+            text=True,
+        ).stdout
+        project_description_dict = json.loads(project_description_json) if project_description_json else {}
+        project_description = project_description_dict.get("description")
+        template_vars["PROJECT_DESCRIPTION"] = input_with_default("Enter the project description", project_description)
+        tv_dirty = True
+    
+    license_full_name = template_vars.get("LICENSE_FULL_NAME")
+    if license_full_name is None:
+        license_full_name = pydev_config.get("licenseFullName")
+        if license_full_name is None:
+            license_full_name = template_vars.get("AUTHOR_NAME")
+        template_vars["LICENSE_FULL_NAME"] = input_with_default("Enter your full name for the license", license_full_name)
+        tv_dirty = True
+
+    github_project_name = template_vars.get("GITHUB_PROJECT_NAME")
+    if github_project_name is None:
+        remote_origin_url = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        github_project_name = Path(remote_origin_url).stem if remote_origin_url else project_dir.name
+        template_vars["GITHUB_PROJECT_NAME"] = input_with_default("Enter the GitHub project name", github_project_name)
+        tv_dirty = True
+        
+    github_owner_name = template_vars.get("GITHUB_OWNER_NAME")
+    if github_owner_name is None:
+        remote_origin_url = subprocess.run(
+            ["git", "config", "--get", "remote.origin.url"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        github_owner_name = parse_github_owner_from_remote_url(remote_origin_url) if remote_origin_url else ""
+        template_vars["GITHUB_OWNER_NAME"] = input_with_default("Enter the GitHub owner name", github_owner_name)
+        tv_dirty = True
+
+    python_package_name = template_vars.get("PYTHON_PACKAGE")
+    if python_package_name is None:
+        python_package_name = project_dir.name
+        template_vars["PYTHON_PACKAGE"] = input_with_default("Enter the Python package name (with hyphens)", project_dir.name)
+        tv_dirty = True
+        
+    python_module_name = template_vars.get("PYTHON_MODULE")
+    if python_module_name is None:
+        python_module_name = template_vars["PYTHON_PACKAGE"].replace("-", "_")
+        template_vars["PYTHON_MODULE"] = python_module_name
+        tv_dirty = True
+
+    flush_template_vars()
+    tv_initialized = True
+    return template_vars
+
+def apply_vars_to_file(file_path: Path) -> None:
+    """Apply the template variables to a file."""
+    vars = get_template_vars()
+    with open(file_path) as f:
+        content = f.read()
+    template = Template(content)
+    new_content = template.substitute(vars)
+    with open(file_path, "w") as f:
+        f.write(new_content)
+
+def apply_license_change() -> None:
+    """Apply the license change to the LICENSE file. This is handled specially because the entire
+       Copyright line is replaced."""
+    license_file = project_dir / "LICENSE"
+    if license_file.exists():
+        with open(license_file) as f:
+            lines = f.read().rstrip().splitlines()
+        i_copyright_line = -1
+        for i, line in enumerate(lines):
+            if line.lstrip().startswith("Copyright"):
+                i_copyright_line = i
+                break
+        if i_copyright_line >= 0:
+            year = datetime.now().year
+            lines[i_copyright_line] = f"Copyright (c) {year} {template_vars['LICENSE_FULL_NAME']}"
+            with open(license_file, "w") as f:
+                f.write("\n".join(lines) + "\n")
+                
+def apply_package_src_change() -> None:
+    """Handle renaming the package source directory and expanding vars in source files."""
+    template_src_dir = project_dir / "package_src"
+    package_src_dir = project_dir / template_vars["PYTHON_MODULE"]
+    if not package_src_dir.exists() and template_src_dir.exists():
+        # Rename the templated source directory to the new name
+        template_src_dir.rename(package_src_dir)
+        
+    # Apply template variables to all .py files in the package source directory
+    for py_file in package_src_dir.rglob("*.py"):
+        apply_vars_to_file(py_file)
+        
+def apply_test_changes() -> None:
+    """Apply template variables to the test template file."""
+    test_output_file = project_dir / f"tests/test_{template_vars['PYTHON_MODULE']}.py"
+    if test_template_file.exists() and not test_output_file.exists():
+        # rename the test template file to the new name
+        test_template_file.rename(test_output_file)
+        
+    if test_output_file.exists():
+        apply_vars_to_file(test_output_file)
+        
+def apply_vars(force_init: bool = False) -> None:
+    """Apply the template variables to all templated files."""
+    if not force_init and template_vars_applied_file.exists():
+        return
+    get_template_vars(force_init=force_init)
+    apply_package_src_change()
+    apply_license_change()
+    apply_test_changes()
+    for file_name in templated_files:
+        file_path = project_dir / file_name
+        if file_path.exists():
+            apply_vars_to_file(file_path)
+            
+    template_vars_applied_file.touch()
+            
+def main():
+    parser = ArgumentParser(description="Initialize template variables for the project.")
+    parser.add_argument(
+        "--force-init",
+        action="store_true",
+        help="Force re-initialization of template variables.",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Apply the template variables to all templated files.",
+    )
+    args = parser.parse_args()
+    force_init: bool = args.force_init
+    apply: bool = args.apply
+    get_template_vars(force_init=force_init)
+    if apply:
+        apply_vars(force_init=args.force_init)
+
+if __name__ == "__main__":
+    main()

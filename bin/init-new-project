@@ -1,0 +1,26 @@
+#!/bin/bash
+
+set -euo pipefail
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
+PROJECT_ROOT=$( cd -- "$SCRIPT_DIR/.." &> /dev/null && pwd )
+
+cd "$PROJECT_ROOT"
+
+"$SCRIPT_DIR/install-gh-cli"
+"$SCRIPT_DIR/install-github-environments" --install-gh
+
+if [ -f "$PROJECT_ROOT/.template-vars-applied" ]; then
+    echo "Project already initialized from template.  Skipping." >&2
+else
+    # Set up a brand new project
+    "$SCRIPT_DIR/template-vars" --apply
+
+    git add .
+    git commit -m "Initial commit after applying project template variables"
+fi
+
+# Set up local project environment
+"$SCRIPT_DIR/install"
+
+

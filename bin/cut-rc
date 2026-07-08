@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+# Cut a release candidate by tagging the current HEAD of main.
+# Computes the next rc counter from existing tags, sets pyproject.toml to
+# X.Y.Z-rc.N in a worktree, and pushes the tag — triggering publish-test.yml.
+# Uses a git worktree so the dev's working directory is never modified.
+#
+# Usage: cut-rc [--force]
+#   --force  overwrite an existing tag (allows retrying a failed publish)
+set -euo pipefail
+
+FORCE=0
+if [[ "${1:-}" == "--force" ]]; then
+    FORCE=1
+fi
+
+if ! git diff --quiet || ! git diff --cached --quiet; then
+    echo "error: working tree has uncommitted changes — commit or stash first" >&2
+    exit 1
+fi
+
+if [[ "$(git branch --show-current)" != "main" ]]; then
+    echo "error: cut-rc must be run on main" >&2
+    exit 1
+fi
+
+git fetch --force --tags origin main
+
+AHEAD=$(git rev-list origin/main..HEAD --count)
+if [[ "$AHEAD" -gt 0 ]]; then
+    echo "error: local main is $AHEAD commit(s) ahead of origin/main — push first" >&2
+    exit 1
+fi
+
+eval "$(pdm run python - <<'PY'
+import re, subprocess, sys
+
+with open("pyproject.toml") as f:
+    text = f.read()
+
+vm = re.search(r'^version\s*=\s*"([^"]*)"', text, re.MULTILINE)
+if not vm:
+    sys.exit("version= line not found in pyproject.toml")
+current = vm.group(1)
+
+m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)-dev\.(\d+)", current)
+if not m:
+    sys.exit(f"expected X.Y.Z-dev.N in pyproject.toml, got: {current!r}")
+
+x, y, z = int(m.group(1)), int(m.group(2)), int(m.group(3))
+xyz = f"{x}.{y}.{z}"
+
+tags = subprocess.check_output(["git", "tag", "--list", f"v{xyz}-rc.*"]).decode().split()
+ns = [int(re.search(r"rc\.(\d+)$", t).group(1)) for t in tags if re.search(r"rc\.(\d+)$", t)]
+n = max(ns) + 1 if ns else 1
+new = f"{xyz}-rc.{n}"
+
+nm = re.search(r'^name\s*=\s*"([^"]*)"', text, re.MULTILINE)
+if not nm:
+    sys.exit("name= line not found in pyproject.toml")
+package_name = nm.group(1)
+
+remote = subprocess.check_output(["git", "remote", "get-url", "origin"]).decode().strip()
+rm = re.search(r'github\.com[:/](.+?)(?:\.git)?$', remote)
+if not rm:
+    sys.exit(f"could not parse GitHub repo from remote: {remote!r}")
+github_repo = rm.group(1)
+
+print(f"version: {current} → {new}", file=sys.stderr)
+print(f"RC_VERSION={new}")
+print(f"PACKAGE_NAME={package_name}")
+print(f"GITHUB_REPO={github_repo}")
+PY
+)"
+
+if git rev-parse "v$RC_VERSION" >/dev/null 2>&1; then
+    if [[ "$FORCE" -eq 0 ]]; then
+        echo "error: tag v$RC_VERSION already exists — use --force to overwrite" >&2
+        exit 1
+    fi
+    echo "warning: overwriting existing tag v$RC_VERSION" >&2
+fi
+
+TMP=$(mktemp -d)
+trap 'git worktree remove --force "$TMP" 2>/dev/null; rm -rf "$TMP"' EXIT
+
+git worktree add --detach "$TMP" HEAD
+
+pdm run python - "$RC_VERSION" "$PACKAGE_NAME" "$GITHUB_REPO" "$TMP/pyproject.toml" "$TMP/README.md" <<'PY'
+import re, sys
+new, package_name, github_repo, toml_path, readme_path = sys.argv[1:6]
+
+with open(toml_path) as f:
+    text = f.read()
+updated = re.sub(r'^(version\s*=\s*")[^"]*(")', rf'\g<1>{new}\2', text, flags=re.MULTILINE)
+assert updated != text, "version= line not found in pyproject.toml"
+source_url = f"https://github.com/{github_repo}/tree/v{new}"
+updated = re.sub(r'^(Source\s*=\s*")[^"]*(")', rf'\g<1>{source_url}\2', updated, flags=re.MULTILINE)
+with open(toml_path, "w") as f:
+    f.write(updated)
+
+pypi_ver = re.sub(r"-rc\.", "rc", new)
+pypi_url = f"https://test.pypi.org/project/{package_name}/{pypi_ver}/"
+badge_url = f"https://img.shields.io/badge/pypi-v{pypi_ver}-blue.svg"
+python_badge = "https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13%20|%203.14-blue.svg"
+ci_badge = "https://img.shields.io/badge/CI-passing-brightgreen.svg"
+with open(readme_path) as f:
+    readme = f.read()
+readme = re.sub(r'\[!\[PyPI version\]\([^)]*\)\]\([^)]*\)',
+                f'[![PyPI version]({badge_url})]({pypi_url})', readme)
+readme = re.sub(r'\[!\[Python versions\]\([^)]*\)\]\([^)]*\)',
+                f'[![Python versions]({python_badge})](https://pypi.org/project/{package_name}/)', readme)
+readme = re.sub(r'\[!\[CI\]\([^)]*\)\]\([^)]*\)',
+                f'[![CI]({ci_badge})](https://github.com/{github_repo}/actions/workflows/ci.yml)', readme)
+with open(readme_path, "w") as f:
+    f.write(readme)
+PY
+
+# Prepend an (unreleased) CHANGELOG entry if one doesn't already exist.
+pdm run python - "$RC_VERSION" "$TMP/CHANGELOG.md" <<'PY'
+import re, sys
+xyz = re.fullmatch(r"(\d+\.\d+\.\d+)-rc\.\d+", sys.argv[1]).group(1)
+path = sys.argv[2]
+with open(path) as f:
+    text = f.read()
+header = f"## {xyz} (unreleased)"
+if header not in text:
+    entry = f"{header}\n\n- _Add release notes here._\n\n"
+    text = re.sub(r"^(# CHANGELOG\n+)", rf"\1{entry}", text)
+    with open(path, "w") as f:
+        f.write(text)
+PY
+
+git -C "$TMP" add pyproject.toml CHANGELOG.md README.md
+git -C "$TMP" commit -m "chore: release $RC_VERSION"
+
+if [[ "$FORCE" -eq 1 ]]; then
+    git -C "$TMP" tag -f "v$RC_VERSION"
+    git push --force origin "v$RC_VERSION"
+else
+    git -C "$TMP" tag "v$RC_VERSION"
+    git push origin "v$RC_VERSION"
+fi

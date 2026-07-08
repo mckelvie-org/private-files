@@ -1,0 +1,76 @@
+[build-system]
+requires = ["pdm-backend>=2.4.0"]
+build-backend = "pdm.backend"
+
+[project]
+name = "private-files"
+version = "0.0.0-dev.1"
+description = "Manage secret/private files in an os-independent way"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [
+  { name = "Sam McKelvie", email = "dev@mckelvie.org" },
+]
+keywords = []
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/mckelvie-org/private-files"
+Source = "https://github.com/mckelvie-org/private-files"
+"Bug Tracker" = "https://github.com/mckelvie-org/private-files/issues"
+Changelog = "https://github.com/mckelvie-org/private-files/releases"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.11.0",
+    "pytest>=8.3.0",
+    "ruff>=0.6.0",
+    "pdm>=2.27.0",
+]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 140
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "C4"]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["private_files"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+packages = ["private_files"]
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.build]
+includes = ["private_files"]
+
+[tool.pdm.scripts]
+test = "pytest"
+lint = "ruff check ."
+typecheck = "mypy private_files"
+post_install = "./bin/post-install"
