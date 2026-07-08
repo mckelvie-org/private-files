@@ -9,11 +9,13 @@ import shutil
 import sys
 from functools import cache
 from pathlib import Path
-from typing import IO, Any, BinaryIO, Final, Literal, TextIO, overload
+from typing import IO, Any, BinaryIO, Final, Literal, TextIO, TypeAlias, overload
 
 from platformdirs import user_data_dir
 
 __all__ =  [
+    "OpenTextMode",
+    "OpenBinaryMode",
     "get_shared_private_dir",
     "create_shared_private_dir",
     "PrivateFilesManager",
@@ -29,6 +31,22 @@ __all__ =  [
 ]
 
 UNIX_PRIVATE_DIR_ROOT_PATH: Final[Path] = Path("~/.private")
+
+OpenTextMode: TypeAlias = Literal[
+    "r", "rt", "r+", "r+t", "rt+",
+    "w", "wt", "w+", "w+t", "wt+",
+    "a", "at", "a+", "a+t", "at+",
+    "x", "xt", "x+", "x+t", "xt+",
+]
+"""Mode strings for open() calls that produce a TextIO."""
+
+OpenBinaryMode: TypeAlias = Literal[
+    "rb", "r+b", "rb+",
+    "wb", "w+b", "wb+",
+    "ab", "a+b", "ab+",
+    "xb", "x+b", "xb+",
+]
+"""Mode strings for open() calls that produce a BinaryIO."""
 
 @cache
 def get_shared_private_dir() -> Path:
@@ -315,142 +333,17 @@ class PrivateFilesManager:
 
     @overload
     def open(
-            self, filename: str | Path, mode: Literal["r"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
+            self, filename: str | Path, mode: OpenTextMode, *, subdir: str | Path = ".", create_parent: bool = False, **kwargs: Any
         ) -> TextIO: ...
 
     @overload
     def open(
-            self, filename: str | Path, mode: Literal["rt"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["rb"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
+            self, filename: str | Path, mode: OpenBinaryMode, *, subdir: str | Path = ".", create_parent: bool = False, **kwargs: Any
         ) -> BinaryIO: ...
 
     @overload
     def open(
-            self, filename: str | Path, mode: Literal["r+"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["r+t"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["rt+"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["r+b"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> BinaryIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["rb+"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> BinaryIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["w"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["wt"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["wb"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> BinaryIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["w+"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["w+t"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["w+b"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> BinaryIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["wb+"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> BinaryIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["a"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["at"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["ab"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> BinaryIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["a+"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["a+t"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["a+b"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> BinaryIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["a+b"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> BinaryIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["x"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["xb"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> BinaryIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["x+"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> TextIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["x+b"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> BinaryIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: Literal["xb+"], *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
-        ) -> BinaryIO: ...
-
-    @overload
-    def open(
-            self, filename: str | Path, mode: str, *, subdir: str | Path = ".", create_parent: bool = False, **kwargs
+            self, filename: str | Path, mode: str, *, subdir: str | Path = ".", create_parent: bool = False, **kwargs: Any
         ) -> IO[Any]: ...
 
     def open(
@@ -459,7 +352,7 @@ class PrivateFilesManager:
                 mode: str = "r", *,
                 subdir: str | Path = ".",
                 create_parent: bool = False,
-                **kwargs
+                **kwargs: Any
             ) -> IO[Any]:
         """Open a file with the given name in the application-specific user-wide private directory and subdirectory,
         creating the directory if necessary. If writing to the file, ensure that it has permissions 0600
@@ -585,164 +478,20 @@ def get_private_app_file(
 
 @overload
 def open_private_app_file(
-        filename: str | Path, mode: Literal["r"], *, subdir: str | Path= ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
+        filename: str | Path, mode: OpenTextMode, *, subdir: str | Path = ".",
+        create_parent: bool = False, app_name: str | None = None, **kwargs: Any
     ) -> TextIO: ...
 
 @overload
 def open_private_app_file(
-        filename: str | Path, mode: Literal["rt"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["rb"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> BinaryIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["r+"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["r+t"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["rt+"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["r+b"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> BinaryIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["rb+"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> BinaryIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["w"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["wt"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["wb"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> BinaryIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["w+"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["w+t"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["w+b"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> BinaryIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["wb+"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> BinaryIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["a"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["at"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["ab"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> BinaryIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["a+"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["a+t"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["a+b"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> BinaryIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["x"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["xb"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> BinaryIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["x+"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["x+b"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
-    ) -> BinaryIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: Literal["xb+"], *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
+        filename: str | Path, mode: OpenBinaryMode, *, subdir: str | Path = ".",
+        create_parent: bool = False, app_name: str | None = None, **kwargs: Any
     ) -> BinaryIO: ...
 
 @overload
 def open_private_app_file(
         filename: str | Path, mode: str, *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs
+        create_parent: bool = False, app_name: str | None = None, **kwargs: Any
     ) -> IO[Any]: ...
 
 def open_private_app_file(
@@ -752,7 +501,7 @@ def open_private_app_file(
             subdir: str | Path = ".",
             create_parent: bool = False,
             app_name: str | None = None,
-            **kwargs
+            **kwargs: Any
         ) -> IO[Any]:
     """Open a file with the given name in the application-specific user-wide private directory and subdirectory,
        creating the directory if necessary. This is a convenience wrapper around get_private_app_file and open."""
