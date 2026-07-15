@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 3.0.0 (unreleased)
+
+- _Add release notes here._
+
 ## [3.0.0]
 
 ### Changed
