@@ -119,7 +119,10 @@ From that freshly bumped `X.Y.Z-dev.N`, it finds the next unused rc counter from
 `v<x.y.z>-rc.*` tags, sets the version to `X.Y.Z-rc.N` in a worktree, tags the commit
 `v<x.y.z>-rc.<n>`, and pushes the tag — triggering the `Publish TestPyPI` workflow.
 
-After a successful publish the workflow updates the `rc-latest` tag.
+`cut-rc` then waits for that workflow and shows its live status. The workflow itself polls
+TestPyPI until the version is actually visible there before reporting success (the upload API call
+succeeding doesn't mean the index has caught up yet -- there's a brief propagation window), and
+updates the `rc-latest` tag. If the workflow fails, `cut-rc` reports it and exits non-zero.
 
 Use `--force` to overwrite an existing tag and retry a failed publish.
 
@@ -146,13 +149,15 @@ bin/cut-prod [--force]
   sync with its upstream -- no local-only commits. A detached rc checkout has nothing to sync,
   since the commit is already reachable from origin via its tag.
 - The resolved rc version must actually exist on TestPyPI (checked directly against
-  `test.pypi.org`) -- promoting an rc that never successfully published is refused.
+  `test.pypi.org`, with a short retry to ride out any residual index-propagation lag) --
+  promoting an rc that never successfully published is refused.
 
 It also warns (without blocking) if `origin/main` has moved since the rc was cut, in case that
 matters to you.
 
 Strips the rc qualifier, commits to a worktree, tags the commit `v<x.y.z>`, and pushes the tag —
-triggering `Publish`, which updates `prod-latest` and then ensures `main` carries a dev version
+triggering `Publish`, which (like `Publish TestPyPI`) polls PyPI until the version is actually
+visible before reporting success, updates `prod-latest`, and then ensures `main` carries a dev version
 strictly ahead of the one just published, bumping to `X.Y.(Z+1)-dev.1` if needed. This is safe with
 other developers landing commits on `main`, or another release racing to bump it at the same time:
 every attempt re-fetches the live tip of `main` and re-evaluates whether a bump is still needed from

@@ -105,7 +105,16 @@ PY
 )"
 
 # Require that this rc was actually published to TestPyPI -- not just tagged locally.
-HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://test.pypi.org/pypi/${PACKAGE_NAME}/${RC_VERSION}/json")
+# publish-test.yml itself waits for index visibility before it reports success, but
+# retry here too: an older rc published before that existed, or any residual lag.
+HTTP=404
+for attempt in 1 2 3 4 5 6; do
+    HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://test.pypi.org/pypi/${PACKAGE_NAME}/${RC_VERSION}/json")
+    if [[ "$HTTP" == "200" ]]; then
+        break
+    fi
+    sleep 5
+done
 if [[ "$HTTP" != "200" ]]; then
     echo "error: $RC_VERSION does not appear to be published on TestPyPI (HTTP $HTTP) — cut-rc must succeed first" >&2
     exit 1
@@ -181,6 +190,7 @@ PY
 
 git -C "$TMP" add pyproject.toml CHANGELOG.md README.md
 git -C "$TMP" commit -m "chore: release $PROD_VERSION"
+PROD_SHA=$(git -C "$TMP" rev-parse HEAD)
 
 if [[ "$FORCE" -eq 1 ]]; then
     git -C "$TMP" tag -f "v$PROD_VERSION"
@@ -190,11 +200,14 @@ else
     git push origin "v$PROD_VERSION"
 fi
 
-# Wait for the triggered Publish workflow, then sync local main on success.
+# Wait for the triggered Publish workflow, then sync local main on success. Identify
+# the run by its head commit SHA, not `gh run list --branch` -- that flag isn't
+# reliable for tag-triggered runs (it filters on branch refs, not tag refs).
 echo "Waiting for the Publish workflow to start..." >&2
 RUN_ID=""
 for _ in $(seq 1 30); do
-    RUN_ID=$(gh run list --workflow=publish.yml --branch "v$PROD_VERSION" --json databaseId --jq '.[0].databaseId' 2>/dev/null || true)
+    RUN_ID=$(gh run list --workflow=publish.yml --json databaseId,headSha --limit 20 \
+        --jq "[.[] | select(.headSha == \"$PROD_SHA\")] | .[0].databaseId" 2>/dev/null || true)
     if [[ -n "$RUN_ID" && "$RUN_ID" != "null" ]]; then
         break
     fi

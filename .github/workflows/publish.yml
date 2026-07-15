@@ -72,6 +72,26 @@ jobs:
         with:
           packages-dir: dist/
 
+      # The upload API call succeeding doesn't mean the index has caught up yet --
+      # PyPI has a brief eventual-consistency window where the just-published
+      # version can 404 for a bit. Poll until it's actually visible, so that this
+      # workflow succeeding is a reliable signal for anything waiting on it (e.g.
+      # the install smoke test, or a human running `pip install` right after).
+      - name: Wait for PyPI visibility
+        run: |
+          PACKAGE=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['name'])")
+          for attempt in $(seq 1 24); do
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://pypi.org/pypi/${PACKAGE}/${VERSION}/json")
+            if [[ "$HTTP" == "200" ]]; then
+              echo "${PACKAGE} ${VERSION} is visible on PyPI (attempt ${attempt})."
+              exit 0
+            fi
+            echo "Not visible yet (HTTP $HTTP), attempt ${attempt}/24, retrying..."
+            sleep 5
+          done
+          echo "::error::${PACKAGE} ${VERSION} did not become visible on PyPI after waiting"
+          exit 1
+
       - name: Configure git
         run: |
           git config user.name "github-actions[bot]"

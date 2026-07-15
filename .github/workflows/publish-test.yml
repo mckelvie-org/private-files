@@ -91,6 +91,26 @@ jobs:
         with:
           repository-url: https://test.pypi.org/legacy/
 
+      # The upload API call succeeding doesn't mean the index has caught up yet --
+      # TestPyPI has a brief eventual-consistency window where the just-published
+      # version can 404 for a bit. Poll until it's actually visible, so that this
+      # workflow succeeding is a reliable signal for anything waiting on it (e.g.
+      # cut-prod's own visibility check, run right after cut-rc finishes).
+      - name: Wait for TestPyPI visibility
+        run: |
+          PACKAGE=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml', 'rb'))['project']['name'])")
+          for attempt in $(seq 1 24); do
+            HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://test.pypi.org/pypi/${PACKAGE}/${VERSION}/json")
+            if [[ "$HTTP" == "200" ]]; then
+              echo "${PACKAGE} ${VERSION} is visible on TestPyPI (attempt ${attempt})."
+              exit 0
+            fi
+            echo "Not visible yet (HTTP $HTTP), attempt ${attempt}/24, retrying..."
+            sleep 5
+          done
+          echo "::error::${PACKAGE} ${VERSION} did not become visible on TestPyPI after waiting"
+          exit 1
+
       - name: Update rc-latest tag
         run: |
           git config user.name "github-actions[bot]"

@@ -11,6 +11,7 @@
 # X.Y.Z-rc.N in a worktree, and pushes the tag — triggering publish-test.yml.
 # Uses a git worktree so the dev's working directory (beyond the dev-bump commit
 # above) is never modified.
+# Finally waits for that workflow to finish and reports its outcome.
 #
 # Usage: cut-rc [--force]
 #   --force  overwrite an existing tag (allows retrying a failed publish)
@@ -148,6 +149,7 @@ PY
 
 git -C "$TMP" add pyproject.toml CHANGELOG.md README.md
 git -C "$TMP" commit -m "chore: release $RC_VERSION"
+RC_SHA=$(git -C "$TMP" rev-parse HEAD)
 
 if [[ "$FORCE" -eq 1 ]]; then
     git -C "$TMP" tag -f "v$RC_VERSION"
@@ -155,4 +157,33 @@ if [[ "$FORCE" -eq 1 ]]; then
 else
     git -C "$TMP" tag "v$RC_VERSION"
     git push origin "v$RC_VERSION"
+fi
+
+# Wait for the triggered Publish TestPyPI workflow and report its outcome. Unlike
+# cut-prod there's nothing to sync locally afterward -- this workflow only ever
+# updates the rc-latest tag, never main. Identify the run by its head commit SHA,
+# not `gh run list --branch` -- that flag isn't reliable for tag-triggered runs
+# (it filters on branch refs, not tag refs).
+echo "Waiting for the Publish TestPyPI workflow to start..." >&2
+RUN_ID=""
+for _ in $(seq 1 30); do
+    RUN_ID=$(gh run list --workflow=publish-test.yml --json databaseId,headSha --limit 20 \
+        --jq "[.[] | select(.headSha == \"$RC_SHA\")] | .[0].databaseId" 2>/dev/null || true)
+    if [[ -n "$RUN_ID" && "$RUN_ID" != "null" ]]; then
+        break
+    fi
+    sleep 2
+done
+
+if [[ -z "$RUN_ID" || "$RUN_ID" == "null" ]]; then
+    echo "warning: could not find the triggered Publish TestPyPI workflow run — check GitHub Actions manually" >&2
+    exit 0
+fi
+
+echo "Watching run $RUN_ID..." >&2
+if gh run watch "$RUN_ID" --exit-status; then
+    echo "Publish TestPyPI succeeded for v$RC_VERSION." >&2
+else
+    echo "error: Publish TestPyPI workflow failed — see the run above for details" >&2
+    exit 1
 fi
