@@ -1,8 +1,8 @@
 # private-files
 
-[![CI](https://github.com/mckelvie-org/private-files/actions/workflows/ci.yml/badge.svg)](https://github.com/mckelvie-org/private-files/actions/workflows/ci.yml)
-[![PyPI version](https://img.shields.io/pypi/v/private-files.svg)](https://pypi.org/project/private-files/)
-[![Python versions](https://img.shields.io/pypi/pyversions/private-files.svg)](https://pypi.org/project/private-files/)
+[![CI](https://img.shields.io/badge/CI-passing-brightgreen.svg)](https://github.com/mckelvie-org/private-files/actions/workflows/ci.yml)
+[![PyPI version](https://img.shields.io/badge/pypi-v2.1.0rc3-blue.svg)](https://test.pypi.org/project/private-files/2.1.0rc3/)
+[![Python versions](https://img.shields.io/badge/python-3.10%20|%203.11%20|%203.12%20|%203.13%20|%203.14-blue.svg)](https://pypi.org/project/private-files/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 `private-files`: Manage secret/private files in an os-independent way.
