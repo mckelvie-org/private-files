@@ -238,10 +238,7 @@ if [[ -z "$RUN_ID" ]]; then
 fi
 
 echo "Watching run $RUN_ID..." >&2
-# Piped through cat so gh doesn't detect a TTY and switch to its interactive,
-# screen-clearing live-redraw display -- this way it just prints sequential
-# status-update lines instead. (pipefail, set above, keeps gh's own exit status.)
-if gh run watch "$RUN_ID" --exit-status | cat; then
+if gh run watch "$RUN_ID" --exit-status; then
     echo "Publish succeeded. Syncing local main..." >&2
     if [[ "$(git branch --show-current)" == "main" ]]; then
         git fetch origin main
