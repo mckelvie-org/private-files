@@ -1,12 +1,22 @@
 #!/usr/bin/env bash
 # Cut a release candidate by tagging the current HEAD of main.
-# Computes the next rc counter from existing tags, sets pyproject.toml to
+# First bumps the dev release number (the N in X.Y.Z-dev.N) on main itself,
+# committing and pushing it immediately -- this keeps every cut starting from a
+# fresh, unique dev version, and doubles as a sync check: if local main isn't
+# exactly in sync with origin/main, this push fails loudly right away instead of
+# silently cutting from a stale base. That bump commit is NOT rolled back even if
+# the rest of this script (or the triggered publish) later fails; that's fine,
+# it's just a dev-number increment.
+# Then computes the next rc counter from existing tags, sets pyproject.toml to
 # X.Y.Z-rc.N in a worktree, and pushes the tag — triggering publish-test.yml.
-# Uses a git worktree so the dev's working directory is never modified.
+# Uses a git worktree so the dev's working directory (beyond the dev-bump commit
+# above) is never modified.
 #
 # Usage: cut-rc [--force]
 #   --force  overwrite an existing tag (allows retrying a failed publish)
 set -euo pipefail
+
+SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 
 FORCE=0
 if [[ "${1:-}" == "--force" ]]; then
@@ -25,11 +35,17 @@ fi
 
 git fetch --force --tags origin main
 
-AHEAD=$(git rev-list origin/main..HEAD --count)
-if [[ "$AHEAD" -gt 0 ]]; then
-    echo "error: local main is $AHEAD commit(s) ahead of origin/main — push first" >&2
+LOCAL_SHA=$(git rev-parse HEAD)
+REMOTE_SHA=$(git rev-parse origin/main)
+if [[ "$LOCAL_SHA" != "$REMOTE_SHA" ]]; then
+    echo "error: local main ($LOCAL_SHA) is not in sync with origin/main ($REMOTE_SHA) — pull/rebase (and push, if you have local commits) first" >&2
     exit 1
 fi
+
+"$SCRIPT_DIR/bump-dev" dev
+git add pyproject.toml
+git commit -m "chore: bump dev version before cutting rc"
+git push origin main
 
 eval "$(pdm run python - <<'PY'
 import re, subprocess, sys

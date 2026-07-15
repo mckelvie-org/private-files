@@ -3,9 +3,11 @@ run-name: "Publish PyPI · ${{ github.ref_name }}"
 
 # Triggered by a push of a v<x.y.z> tag (done by cut-prod).
 #
-# After a successful PyPI publish, updates the prod-latest tag, then
-# automatically bumps main to the next patch dev version (X.Y.(Z+1)-dev.1).
-# The bump is skipped if main is already ahead of the published version.
+# After a successful PyPI publish, updates the prod-latest tag, then ensures
+# main carries a dev version strictly ahead of the one just published (bumping
+# to X.Y.(Z+1)-dev.1 if needed). Safe with other developers landing unrelated
+# commits on main, or a concurrent release racing to bump it too -- see the
+# "Ensure main is ahead of the published version" step for how.
 
 on:
   push:
@@ -80,14 +82,21 @@ jobs:
           git tag -f prod-latest
           git push --force origin prod-latest
 
-      # Runs only after a successful publish.  Bumps main to X.Y.(Z+1)-dev.1
-      # unless main is already ahead of the version just published.
-      - name: Bump main to next patch dev version
+      # Runs only after a successful publish. Ensures main carries a dev version
+      # strictly ahead of the version just published, bumping it if necessary.
+      #
+      # main is a moving target in a multi-developer setting -- other commits
+      # (including bumps from a concurrent release) may land between our fetch
+      # and our push, or may already be sitting on main by the time this job
+      # even starts. So every attempt re-fetches live main and re-evaluates
+      # "is a bump still needed" from scratch, rather than trusting a snapshot.
+      # If our push loses a race, we just loop: re-fetch, re-check (the winner's
+      # bump may already satisfy the requirement, in which case we're done for
+      # free), and only re-commit if main is still behind. Gives up after a
+      # handful of attempts if the race never settles.
+      - name: Ensure main is ahead of the published version
         run: |
-          git fetch origin main
-          git checkout main
-
-          python - <<'PY'
+          cat > /tmp/compute_bump.py <<'PY'
           import os, re, sys, tomllib
 
           prod = os.environ["VERSION"]               # e.g. "1.0.0"
@@ -102,13 +111,15 @@ jobs:
 
           m = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)-dev\.(\d+)", current)
           if not m:
-              print(f"Main version {current!r} is not a -dev version — skipping auto-bump")
-              sys.exit(0)
+              print(f"Main version {current!r} is not a -dev version — skipping auto-bump", file=sys.stderr)
+              print("skip")
+              sys.exit()
 
           mx, my, mz = int(m.group(1)), int(m.group(2)), int(m.group(3))
           if (mx, my, mz) > (px, py_, pz):
-              print(f"Main {current!r} is already ahead of {prod} — skipping auto-bump")
-              sys.exit(0)
+              print(f"Main {current!r} is already ahead of {prod} — skipping auto-bump", file=sys.stderr)
+              print("skip")
+              sys.exit()
 
           # Patch bump: minimum increment to make main numerically > prod.
           new = f"{px}.{py_}.{pz + 1}-dev.1"
@@ -123,25 +134,32 @@ jobs:
           assert updated != text, "version= line not found in pyproject.toml"
           with open("pyproject.toml", "w") as f:
               f.write(updated)
-          print(f"Bumping main from {current} to {new}")
+          print(f"Bumping main from {current} to {new}", file=sys.stderr)
+          print(new)
           PY
 
-          if git diff --quiet; then
-            echo "No version change required on main"
-            exit 0
-          fi
-
-          NEW_VERSION=$(python -c "
-          import tomllib
-          print(tomllib.load(open('pyproject.toml', 'rb'))['project']['version'])
-          ")
-          git add pyproject.toml
-          git commit -m "chore: bump main to ${NEW_VERSION} after v${VERSION} release"
-
-          # A concurrent push to main between our fetch and now would cause a
-          # non-fast-forward failure.  Rebase once and retry before giving up.
-          git push origin main || {
+          for attempt in 1 2 3 4 5; do
             git fetch origin main
-            git rebase origin/main
-            git push origin main
-          }
+            git checkout --quiet --detach origin/main
+
+            ACTION=$(python /tmp/compute_bump.py)
+
+            if [[ "$ACTION" == "skip" ]]; then
+              echo "No bump needed."
+              exit 0
+            fi
+
+            git add pyproject.toml
+            git commit -q -m "chore: bump main to ${ACTION} after v${VERSION} release"
+
+            if git push origin HEAD:main; then
+              echo "Bumped main to ${ACTION}"
+              exit 0
+            fi
+
+            echo "Push race on attempt ${attempt}, retrying..."
+            sleep $((attempt * 2))
+          done
+
+          echo "::error::could not bump main after several attempts (persistent push race) -- bump it manually"
+          exit 1
