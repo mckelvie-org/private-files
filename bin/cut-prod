@@ -202,19 +202,32 @@ fi
 
 # Wait for the triggered Publish workflow, then sync local main on success. Identify
 # the run by its head commit SHA, not `gh run list --branch` -- that flag isn't
-# reliable for tag-triggered runs (it filters on branch refs, not tag refs).
+# reliable for tag-triggered runs (it filters on branch refs, not tag refs). Errors
+# from `gh` are allowed to print (not silenced) so an auth/API problem is visible
+# instead of just "not found". If no run has matched by SHA halfway through, fall
+# back to the most recently created run for this workflow -- for a solo/small-team
+# repo, the newest run of a workflow we just triggered is almost certainly it.
 echo "Waiting for the Publish workflow to start..." >&2
 RUN_ID=""
-for _ in $(seq 1 30); do
+for attempt in $(seq 1 30); do
     RUN_ID=$(gh run list --workflow=publish.yml --json databaseId,headSha --limit 20 \
-        --jq "[.[] | select(.headSha == \"$PROD_SHA\")] | .[0].databaseId" 2>/dev/null || true)
-    if [[ -n "$RUN_ID" && "$RUN_ID" != "null" ]]; then
+        --jq "[.[] | select(.headSha == \"$PROD_SHA\")] | .[0].databaseId // empty") || true
+    if [[ -n "$RUN_ID" ]]; then
+        echo "Found run $RUN_ID for commit $PROD_SHA." >&2
         break
+    fi
+    if [[ "$attempt" -eq 15 ]]; then
+        FALLBACK_ID=$(gh run list --workflow=publish.yml --json databaseId --limit 1 --jq '.[0].databaseId // empty') || true
+        if [[ -n "$FALLBACK_ID" ]]; then
+            echo "No run matched commit $PROD_SHA after $attempt attempts — falling back to the most recently created run for this workflow: $FALLBACK_ID" >&2
+            RUN_ID="$FALLBACK_ID"
+            break
+        fi
     fi
     sleep 2
 done
 
-if [[ -z "$RUN_ID" || "$RUN_ID" == "null" ]]; then
+if [[ -z "$RUN_ID" ]]; then
     echo "warning: could not find the triggered Publish workflow run — check GitHub Actions manually; local main was not synced" >&2
     exit 0
 fi

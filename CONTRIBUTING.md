@@ -44,7 +44,7 @@ pending publisher**:
 Once the above is in place:
 
 1. (optional) `bin/bump-dev [patch|minor|major]` — for a deliberate semantic version bump on `main`
-2. `bin/cut-rc` — bumps+commits+pushes the dev number on `main`, then pushes a `v*-rc.*` tag → triggers `publish-test.yml` → TestPyPI
+2. `bin/cut-rc` — pushes a `v*-rc.*` tag → triggers `publish-test.yml` → TestPyPI, then waits for that workflow and reports its outcome
 3. `git checkout v<x.y.z>-rc.<n>` — check out the rc that TestPyPI just accepted
 4. `bin/cut-prod` — pushes a `v*.*.*` tag → triggers `publish.yml` → PyPI + auto-bumps `main`, then waits for that workflow and syncs your local `main`
 
@@ -80,9 +80,10 @@ dev versions always apear "newer" than rc or prod versions they are based on, an
 
 ### Bump the dev version
 
-`bin/cut-rc` automatically bumps the dev release number (the `N` in `X.Y.Z-dev.N`) every time
-it runs, so you don't need to do this yourself before cutting an rc. Use `bin/bump-dev` directly
-only when you want a deliberate semantic bump -- a new `X.Y.Z` -- ahead of time:
+Cutting an rc doesn't require bumping the dev release number first -- the rc counter
+(`X.Y.Z-rc.N`) is unique on its own, independent of whatever `N` `main`'s own `X.Y.Z-dev.N`
+currently carries. Use `bin/bump-dev` when you want a deliberate version bump ahead of time,
+most commonly a semantic one (a new `X.Y.Z`):
 
 ```bash
 bin/bump-dev [dev|patch|minor|major]   # edits pyproject.toml, does not commit
@@ -108,14 +109,7 @@ bin/cut-rc [--force]
 
 `cut-rc` first requires a clean working tree and local `main` to be exactly in sync with
 `origin/main` (any mismatch -- ahead, behind, or diverged -- is an error; pull/rebase and/or push
-to fix). It then bumps the dev release number in `pyproject.toml`, commits, and pushes that to
-`main` immediately -- this both guarantees a fresh, unique dev version for every cut and doubles
-as a sync check: if local `main` wasn't actually in sync (a race with something else pushing to
-`main`), this push fails loudly right here rather than silently cutting from a stale base. That
-dev-bump commit is pushed for good regardless of whether the rest of this command succeeds; that's
-fine, it's just a number increment.
-
-From that freshly bumped `X.Y.Z-dev.N`, it finds the next unused rc counter from existing
+to fix). From `main`'s current `X.Y.Z-dev.N`, it finds the next unused rc counter from existing
 `v<x.y.z>-rc.*` tags, sets the version to `X.Y.Z-rc.N` in a worktree, tags the commit
 `v<x.y.z>-rc.<n>`, and pushes the tag — triggering the `Publish TestPyPI` workflow.
 
