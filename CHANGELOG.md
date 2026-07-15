@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## [3.0.0]
+
+### Changed
+
+- Renamed the package's single entry point `private_files()` -> `get_private_files()`, since
+  naming a function the same as its own package is bad form.
+
 ## [2.0.0]
 
 ### Added

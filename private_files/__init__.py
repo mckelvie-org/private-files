@@ -22,7 +22,7 @@ __all__ =  [
     "NotEncryptedError",
     "PassphraseRequiredError",
     "PrivateFilesManager",
-    "private_files",
+    "get_private_files",
 ]
 
 UNIX_PRIVATE_DIR_ROOT_PATH: Final[Path] = Path("~/.private")
@@ -406,6 +406,6 @@ def _get_private_files_manager(app_name: str | None) -> PrivateFilesManager: # h
                                                                              # hinting for the public function.
     return PrivateFilesManager(app_name=app_name)
 
-def private_files(app_name: str | None = None) -> PrivateFilesManager:
+def get_private_files(app_name: str | None = None) -> PrivateFilesManager:
     """Get a cached PrivateFilesManager instance for the given application name."""
     return _get_private_files_manager(app_name)

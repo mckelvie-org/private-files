@@ -281,18 +281,18 @@ def test_open_explicit_create_parent_overrides_mode_inference(sandbox_root: Path
     assert (manager.get_root_dir() / "a" / "b").is_dir()
 
 
-# --- private_files() ---
+# --- get_private_files() ---
 
 
-def test_private_files_is_cached_per_app_name(sandbox_root: Path) -> None:
-    first = pf.private_files(APP_NAME)
-    second = pf.private_files(APP_NAME)
+def test_get_private_files_is_cached_per_app_name(sandbox_root: Path) -> None:
+    first = pf.get_private_files(APP_NAME)
+    second = pf.get_private_files(APP_NAME)
     assert first is second
 
 
-def test_private_files_distinct_per_app_name(sandbox_root: Path) -> None:
-    a = pf.private_files("app-a")
-    b = pf.private_files("app-b")
+def test_get_private_files_distinct_per_app_name(sandbox_root: Path) -> None:
+    a = pf.get_private_files("app-a")
+    b = pf.get_private_files("app-b")
     assert a is not b
     assert a.get_root_dir() != b.get_root_dir()
 

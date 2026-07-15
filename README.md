@@ -47,9 +47,9 @@ pip install private-files
 ## Quick Start
 
 ```python
-from private_files import private_files
+from private_files import get_private_files
 
-files = private_files(app_name="myapp")
+files = get_private_files(app_name="myapp")
 
 # Write a secret. Parent directories are created automatically (mode 0700),
 # and the file itself ends up with mode 0600.
@@ -66,7 +66,7 @@ print(files.get_root_dir())
 # -> C:\Users\alice\AppData\Local\myapp\myapp   (Windows)
 ```
 
-`private_files(app_name)` returns a process-wide cached `PrivateFilesManager` for a given `app_name` --
+`get_private_files(app_name)` returns a process-wide cached `PrivateFilesManager` for a given `app_name` --
 repeated calls with the same `app_name` return the same instance, reusing its already-resolved,
 already-verified paths. You can also construct a `PrivateFilesManager` directly (e.g. to bypass the
 cache, or if you're only ever going to use one `app_name` and would rather hold a local reference):
@@ -142,7 +142,7 @@ needing a passphrase (it just peeks at the file's header). It returns `False` fo
 
 ## API Reference
 
-### `private_files(app_name=None) -> PrivateFilesManager`
+### `get_private_files(app_name=None) -> PrivateFilesManager`
 
 The package's single entry point. Returns a cached `PrivateFilesManager` for the given `app_name` (or the
 shared root itself, if `app_name` is `None`) -- repeated calls with the same `app_name` return the same
@@ -187,9 +187,9 @@ directory paths across calls.
 ### Reading and writing binary data
 
 ```python
-from private_files import private_files
+from private_files import get_private_files
 
-files = private_files(app_name="myapp")
+files = get_private_files(app_name="myapp")
 
 with files.open("cache.bin", "wb") as f:
     f.write(b"\x00\x01\x02")
