@@ -22,6 +22,11 @@
 #            otherwise the rc-latest tag.
 set -euo pipefail
 
+if ! command -v gh >/dev/null 2>&1; then
+    echo "error: gh CLI not found in PATH — run bin/install-gh-cli, or open a new terminal if you just installed it" >&2
+    exit 1
+fi
+
 FORCE=0
 if [[ "${1:-}" == "--force" ]]; then
     FORCE=1
@@ -233,7 +238,10 @@ if [[ -z "$RUN_ID" ]]; then
 fi
 
 echo "Watching run $RUN_ID..." >&2
-if gh run watch "$RUN_ID" --exit-status; then
+# Piped through cat so gh doesn't detect a TTY and switch to its interactive,
+# screen-clearing live-redraw display -- this way it just prints sequential
+# status-update lines instead. (pipefail, set above, keeps gh's own exit status.)
+if gh run watch "$RUN_ID" --exit-status | cat; then
     echo "Publish succeeded. Syncing local main..." >&2
     if [[ "$(git branch --show-current)" == "main" ]]; then
         git fetch origin main
