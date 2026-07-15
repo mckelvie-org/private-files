@@ -7,10 +7,9 @@ from __future__ import annotations
 import os
 import shutil
 import sys
-from collections.abc import Callable
 from functools import cache
 from pathlib import Path
-from typing import IO, Any, BinaryIO, Final, Literal, ParamSpec, Protocol, TextIO, TypeAlias, TypeVar, cast, overload
+from typing import IO, Any, BinaryIO, Final, Literal, TextIO, TypeAlias, overload
 
 from platformdirs import user_data_dir
 
@@ -49,25 +48,8 @@ OpenBinaryMode: TypeAlias = Literal[
 ]
 """Mode strings for open() calls that produce a BinaryIO."""
 
-P = ParamSpec("P")
-T = TypeVar("T", covariant=True)
-
-class _CachedFunction(Protocol[P, T]):
-    def __call__(self, *args: P.args, **kwargs: P.kwargs) -> T: ...
-    def cache_clear(self) -> None: ...
-
-def _typed_cache(func: Callable[P, T]) -> _CachedFunction[P, T]:
-    return cast("_CachedFunction[P, T]", cache(func))
-
-@_typed_cache
-def get_shared_private_dir() -> Path:
-    """Get the name of the shared user-wide private root directory for storing sensitive data like authentication tokens.
-    On linux and macos, this will be ~/.private, which the user can choose to encrypt or protect as needed.
-    On Windows, this will be the non-roaming app data directory.
-    
-    Does not create the directory or guarantee any particular permissions, so the returned directory
-    may not be safe for storing sensitive data until create_private_dir has been called.
-    """
+@cache
+def _get_shared_private_dir() -> Path:   # hide the @cache so that it does not screw up type hinthing for the public function.
     if sys.platform == "win32":
         # On Windows, use a well-known subdir of the non-roaming app data directory,
         # which is not backed up to the cloud and is not shared across devices.
@@ -76,17 +58,23 @@ def get_shared_private_dir() -> Path:
         # On Linux and MacOS, use ~/.private, which the user can choose to encrypt or protect as needed
         return UNIX_PRIVATE_DIR_ROOT_PATH.expanduser().resolve()
 
-@_typed_cache
-def create_shared_private_dir() -> Path:
-    """Create and return the shared user-wide private root directory for storing sensitive data like authentication tokens,
-    if it does not already exist. On linux and macos, this will be ~/.private, which the user can choose to encrypt or protect as needed.
+def get_shared_private_dir() -> Path:
+    """Get the name of the shared user-wide private root directory for storing sensitive data like authentication tokens.
+    On linux and macos, this will be ~/.private, which the user can choose to encrypt or protect as needed.
     On Windows, this will be the non-roaming app data directory.
     
-    If the directory cannot be created or cannot be set to the correct permissions, an exception will be raised.
+    Does not create the directory or guarantee any particular permissions, so the returned directory
+    may not be safe for storing sensitive data until create_private_dir has been called.
     """
+
+    return _get_shared_private_dir()
+
+@cache
+def _create_shared_private_dir() -> Path:   # hide the @cache so that it does not screw up type hinting for the public function.
     private_dir = get_shared_private_dir()
 
-    # create the ~/.private parent directory (or equivalent windows dir) with mode 0700 if necessary, and ensure permissions are correct.
+    # create the ~/.private parent directory (or equivalent windows dir) with mode 0700 if necessary,
+    # and ensure permissions are correct.
     old_umask = os.umask(0o077)
     try:
         os.makedirs(private_dir, mode=0o700, exist_ok=True)
@@ -105,6 +93,15 @@ def create_shared_private_dir() -> Path:
                 "Please set the permissions to 0700 to protect your sensitive data."
             )
     return private_dir
+
+def create_shared_private_dir() -> Path:
+    """Create and return the shared user-wide private root directory for storing sensitive data like authentication tokens,
+    if it does not already exist. On linux and macos, this will be ~/.private, which the user can choose to encrypt or protect as needed.
+    On Windows, this will be the non-roaming app data directory.
+    
+    If the directory cannot be created or cannot be set to the correct permissions, an exception will be raised.
+    """
+    return _create_shared_private_dir()
 
 class PrivateFilesManager:
     """A class for managing private files and directories for an application."""
@@ -386,10 +383,15 @@ class PrivateFilesManager:
             raise
         return f
 
-@_typed_cache
+@cache
+def _get_private_files_manager(app_name: str | None) -> PrivateFilesManager: # hide the @cache so that it does not screw up type
+                                                                             # hinting for the public function.
+    return PrivateFilesManager(app_name=app_name)
+
 def get_private_files_manager(app_name: str | None = None) -> PrivateFilesManager:
     """Get a cached PrivateFilesManager instance for the given application name."""
-    return PrivateFilesManager(app_name=app_name)
+    
+    return _get_private_files_manager(app_name)
 
 def get_private_app_dir(app_name: str | None = None) -> Path:
     """Return the application-specific user-wide private directory for storing sensitive data

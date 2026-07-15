@@ -28,13 +28,13 @@ def sandbox_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     caches (module-level and manager-level) so each test starts from a clean, isolated state."""
     root = tmp_path / ".private"
     monkeypatch.setattr(pf, "UNIX_PRIVATE_DIR_ROOT_PATH", root)
-    pf.get_shared_private_dir.cache_clear()
-    pf.create_shared_private_dir.cache_clear()
-    pf.get_private_files_manager.cache_clear()
+    pf._get_shared_private_dir.cache_clear()
+    pf._create_shared_private_dir.cache_clear()
+    pf._get_private_files_manager.cache_clear()
     yield root
-    pf.get_shared_private_dir.cache_clear()
-    pf.create_shared_private_dir.cache_clear()
-    pf.get_private_files_manager.cache_clear()
+    pf._get_shared_private_dir.cache_clear()
+    pf._create_shared_private_dir.cache_clear()
+    pf._get_private_files_manager.cache_clear()
 
 
 @pytest.fixture
