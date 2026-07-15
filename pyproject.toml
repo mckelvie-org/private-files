@@ -4,7 +4,7 @@ build-backend = "pdm.backend"
 
 [project]
 name = "private-files"
-version = "1.0.2-dev.1"
+version = "2.0.0-dev.1"
 description = "Manage secret/private files in an os-independent way"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -17,6 +17,8 @@ keywords = [
   "secrets",
   "credentials",
   "security",
+  "encryption",
+  "passphrase",
   "permissions",
   "config",
   "cross-platform",
@@ -42,6 +44,7 @@ classifiers = [
 ]
 dependencies = [
   "platformdirs>=4.0.0",
+  "cryptography>=42.0.0",
 ]
 
 [project.urls]

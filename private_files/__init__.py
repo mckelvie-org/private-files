@@ -13,21 +13,16 @@ from typing import IO, Any, BinaryIO, Final, Literal, TextIO, TypeAlias, overloa
 
 from platformdirs import user_data_dir
 
+from private_files._encryption import DecryptionError, NotEncryptedError, PassphraseRequiredError, looks_encrypted, open_encrypted
+
 __all__ =  [
     "OpenTextMode",
     "OpenBinaryMode",
-    "get_shared_private_dir",
-    "create_shared_private_dir",
+    "DecryptionError",
+    "NotEncryptedError",
+    "PassphraseRequiredError",
     "PrivateFilesManager",
-    "get_private_files_manager",
-    "get_private_app_dir",
-    "create_private_app_dir",
-    "get_private_dir",
-    "create_private_dir",
-    "delete_private_dir",
-    "verify_private_dir",
-    "get_private_app_file",
-    "open_private_app_file",
+    "private_files",
 ]
 
 UNIX_PRIVATE_DIR_ROOT_PATH: Final[Path] = Path("~/.private")
@@ -58,20 +53,9 @@ def _get_shared_private_dir() -> Path:   # hide the @cache so that it does not s
         # On Linux and MacOS, use ~/.private, which the user can choose to encrypt or protect as needed
         return UNIX_PRIVATE_DIR_ROOT_PATH.expanduser().resolve()
 
-def get_shared_private_dir() -> Path:
-    """Get the name of the shared user-wide private root directory for storing sensitive data like authentication tokens.
-    On linux and macos, this will be ~/.private, which the user can choose to encrypt or protect as needed.
-    On Windows, this will be the non-roaming app data directory.
-    
-    Does not create the directory or guarantee any particular permissions, so the returned directory
-    may not be safe for storing sensitive data until create_private_dir has been called.
-    """
-
-    return _get_shared_private_dir()
-
 @cache
 def _create_shared_private_dir() -> Path:   # hide the @cache so that it does not screw up type hinting for the public function.
-    private_dir = get_shared_private_dir()
+    private_dir = _get_shared_private_dir()
 
     # create the ~/.private parent directory (or equivalent windows dir) with mode 0700 if necessary,
     # and ensure permissions are correct.
@@ -93,15 +77,6 @@ def _create_shared_private_dir() -> Path:   # hide the @cache so that it does no
                 "Please set the permissions to 0700 to protect your sensitive data."
             )
     return private_dir
-
-def create_shared_private_dir() -> Path:
-    """Create and return the shared user-wide private root directory for storing sensitive data like authentication tokens,
-    if it does not already exist. On linux and macos, this will be ~/.private, which the user can choose to encrypt or protect as needed.
-    On Windows, this will be the non-roaming app data directory.
-    
-    If the directory cannot be created or cannot be set to the correct permissions, an exception will be raised.
-    """
-    return _create_shared_private_dir()
 
 class PrivateFilesManager:
     """A class for managing private files and directories for an application."""
@@ -134,20 +109,20 @@ class PrivateFilesManager:
         may not be safe for storing sensitive data until create_private_dir has been called.
         """
         if self._shared_root_dir is None:
-            self._shared_root_dir = get_shared_private_dir()
+            self._shared_root_dir = _get_shared_private_dir()
         return self._shared_root_dir
-    
+
     def create_shared_root_dir(self) -> Path:
         """Create and return the shared user-wide private root directory for storing sensitive data
         like authentication tokens, if it does not already exist. On linux and macos, this will be
         ~/.private, which the user can choose to encrypt or protect as needed.
         On Windows, this will be the non-roaming app data directory.
-        
+
         If the directory cannot be created or cannot be set to the correct permissions, an exception will be raised.
         """
         shared_root_dir = self.get_shared_root_dir()
         if not self._shared_root_dir_created:
-            create_shared_private_dir()
+            _create_shared_private_dir()
             self._shared_root_dir_created = True
         return shared_root_dir
         
@@ -304,7 +279,20 @@ class PrivateFilesManager:
                             "Please set the permissions to 0700 to protect your sensitive data."
                         )
         return subdir_full
-    
+
+    def _resolve_private_file(self, filename: str | Path, subdir: str | Path) -> Path:
+        """Resolve filename within subdir of the app-specific private directory, verifying that
+        it stays within that subdirectory. Does not touch the filesystem beyond path resolution
+        -- the parent directory is neither verified nor created."""
+        subdir_path = self.get_private_dir(subdir)
+        file_path = (subdir_path / filename).resolve()
+        if not file_path.is_relative_to(subdir_path):
+            raise ValueError(
+                    f"Expected private file {str(filename)!r} to resolve to a path "
+                    f"within the app-specific private directory {str(subdir_path)!r}, but it does not."
+                )
+        return file_path
+
     def get_private_file(
                 self,
                 filename: str | Path,
@@ -313,25 +301,19 @@ class PrivateFilesManager:
             ) -> Path:
         """Get the fully qualified path to a file with the given name in the application-specific
         user-wide private directory for storing sensitive data like authentication tokens.
-        
+
         subdir_name is resolved relative to the app-specific private root directory,
         and filename is resolved relative to subdir_name. The file must resolve
         to a file within the specified subdirectory, or a ValueError will be raised.
-        
+
         If create_parent is True, the parent directory/directories, up to and including the application-specific root
         directory, will be created if they do not already exist, and their permissions will be adjusted to 0700.
-        
+
         If create_parent is False, the directory is not created but the existence and permissions of
         all parent directories are verified.
-        
+
         The file itself is not created, and no guarantees are made about its existence or permissions."""
-        subdir_path = self.get_private_dir(subdir)
-        file_path = (subdir_path / filename).resolve()
-        if not file_path.is_relative_to(subdir_path):
-            raise ValueError(
-                    f"Expected private file {str(filename)!r} to resolve to a path "
-                    f"within the app-specific private directory {str(subdir_path)!r}, but it does not."
-                )
+        file_path = self._resolve_private_file(filename, subdir)
         parent_dir = file_path.parent
         if create_parent:
             self.create_private_dir(parent_dir)
@@ -339,19 +321,29 @@ class PrivateFilesManager:
             self.verify_private_dir(parent_dir)
         return file_path
 
+    def looks_encrypted(self, filename: str | Path, *, subdir: str | Path = ".") -> bool:
+        """Return True if filename (resolved within subdir of the app-specific private directory,
+        the same way open() resolves it) appears to have this library's encrypted-file header,
+        without needing (or attempting to verify) a passphrase. Returns False if the file does
+        not exist. Does not require the parent directory to already exist."""
+        return looks_encrypted(self._resolve_private_file(filename, subdir))
+
     @overload
     def open(
-            self, filename: str | Path, mode: OpenTextMode, *, subdir: str | Path = ".", create_parent: bool = False, **kwargs: Any
+            self, filename: str | Path, mode: OpenTextMode, *, subdir: str | Path = ".", create_parent: bool = False,
+            passphrase: str | bytes | None = None, check_encryption: bool = False, **kwargs: Any
         ) -> TextIO: ...
 
     @overload
     def open(
-            self, filename: str | Path, mode: OpenBinaryMode, *, subdir: str | Path = ".", create_parent: bool = False, **kwargs: Any
+            self, filename: str | Path, mode: OpenBinaryMode, *, subdir: str | Path = ".", create_parent: bool = False,
+            passphrase: str | bytes | None = None, check_encryption: bool = False, **kwargs: Any
         ) -> BinaryIO: ...
 
     @overload
     def open(
-            self, filename: str | Path, mode: str, *, subdir: str | Path = ".", create_parent: bool = False, **kwargs: Any
+            self, filename: str | Path, mode: str, *, subdir: str | Path = ".", create_parent: bool = False,
+            passphrase: str | bytes | None = None, check_encryption: bool = False, **kwargs: Any
         ) -> IO[Any]: ...
 
     def open(
@@ -360,15 +352,41 @@ class PrivateFilesManager:
                 mode: str = "r", *,
                 subdir: str | Path = ".",
                 create_parent: bool = False,
+                passphrase: str | bytes | None = None,
+                check_encryption: bool = False,
                 **kwargs: Any
             ) -> IO[Any]:
         """Open a file with the given name in the application-specific user-wide private directory and subdirectory,
         creating the directory if necessary. If writing to the file, ensure that it has permissions 0600
-        (readable and writable only by the user)."""
-        
+        (readable and writable only by the user).
+
+        If passphrase is given, the file is transparently encrypted at rest with a key derived from the
+        passphrase (Argon2id) and AES-256-GCM authenticated encryption. Encryption/decryption is performed
+        as a whole (in memory) rather than streamed, so all read/write/seek combinations, including
+        update ("r+") and append ("a"/"a+") modes, work normally -- there are no seek restrictions.
+        Raises DecryptionError (or a subclass) on a wrong passphrase, an unsupported/missing format
+        header, or corrupted/tampered data.
+
+        check_encryption only matters when passphrase is not given, and defaults to False so that
+        reading a file's raw encrypted bytes on purpose (e.g. to back it up or copy it elsewhere)
+        is never blocked. When check_encryption=True and mode reads existing content ("r"/"a"),
+        the file's header is peeked first; if it looks like it was written with a passphrase,
+        PassphraseRequiredError is raised instead of silently returning the raw ciphertext.
+        """
         allows_create = any(m in mode for m in "wax")
-        is_write_mode = any(m in mode for m in "wax+")
         file_path = self.get_private_file(filename, create_parent=allows_create or create_parent, subdir=subdir)
+        if passphrase is not None:
+            return open_encrypted(file_path, mode, passphrase, self._open_standard, **kwargs)
+        if check_encryption and ("r" in mode or "a" in mode) and looks_encrypted(file_path):
+            raise PassphraseRequiredError(
+                f"{str(file_path)!r} appears to be passphrase-encrypted; pass passphrase= to open() to read it."
+            )
+        return self._open_standard(file_path, mode, **kwargs)
+
+    def _open_standard(self, file_path: str | Path, mode: str, **kwargs: Any) -> IO[Any]:
+        """Open file_path with the real, unencrypted open(), ensuring that a file opened for
+        writing ends up with permissions 0600 (readable and writable only by the user)."""
+        is_write_mode = any(m in mode for m in "wax+")
         f = open(file_path, mode, **kwargs)  # noqa: SIM115
         try:
             if is_write_mode and sys.platform != "win32":
@@ -388,140 +406,6 @@ def _get_private_files_manager(app_name: str | None) -> PrivateFilesManager: # h
                                                                              # hinting for the public function.
     return PrivateFilesManager(app_name=app_name)
 
-def get_private_files_manager(app_name: str | None = None) -> PrivateFilesManager:
+def private_files(app_name: str | None = None) -> PrivateFilesManager:
     """Get a cached PrivateFilesManager instance for the given application name."""
-    
     return _get_private_files_manager(app_name)
-
-def get_private_app_dir(app_name: str | None = None) -> Path:
-    """Return the application-specific user-wide private directory for storing sensitive data
-       like authentication tokens. On Linux and MacOS, this will be a directory
-       under ~/.private/{app_name} with mode 0700. On Windows, this will be under the non-roaming app data directory.
-    """
-    return get_private_files_manager(app_name).get_root_dir()
-
-def create_private_app_dir(app_name: str | None = None) -> Path:
-    """Create and return the application-specific user-wide private root directory for storing sensitive data
-    like authentication tokens, if it does not already exist. On Linux and MacOS, this will be a directory
-    under ~/.private with mode 0700. On Windows, this will be the non-roaming app data directory.
-    
-    If the directory cannot be created or cannot be set to the correct permissions, an exception will be raised.
-    """
-    return get_private_files_manager(app_name).create_root_dir()
-
-def get_private_dir(subdir: str | Path, app_name: str | None = None) -> Path:
-    """Return the application-specific user-wide private directory or a subdirectory thereof for storing sensitive data
-       like authentication tokens. On Linux and MacOS, this will be a directory
-       under ~/.private/{app_name} with mode 0700. On Windows, this will be under the non-roaming app data directory.
-       
-       Verifies that the resolved path is within the app-specific private directory, but does not
-         create the directory or guarantee any particular permissions.
-    """
-    return get_private_files_manager(app_name).get_private_dir(subdir)
-
-def create_private_dir(subdir: str | Path, app_name: str | None = None) -> Path:
-    """Create and return the application-specific user-wide private directory or a subdirectory thereof for storing sensitive data
-       like authentication tokens, if it does not already exist. On Linux and MacOS, this will be a directory
-       under ~/.private/{app_name} with mode 0700. On Windows, this will be under the non-roaming app data directory.
-       
-       If the directory cannot be created or cannot be set to the correct permissions, an exception will be raised.
-       
-       If subdir_name is a relative path, it is resolved relative to the the app-specific private root directory.
-       Regardless, it must resolve to the app-specific root directory or a subdirectory of it.
-       For example, "." can be used to refer to the app-specific private root directory itself.
-    """
-    return get_private_files_manager(app_name).create_private_dir(subdir)
-
-def delete_private_dir(subdir_name: str | Path, app_name: str) -> None:
-    """Delete the application-specific user-wide private directory or a subdirectory thereof for storing sensitive data
-       like authentication tokens, if it exists. On Linux and MacOS, this will be a directory
-       under ~/.private/{app_name} with mode 0700. On Windows, this will be under the non-roaming app data directory.
-       
-       If the directory does not exist, nothing happens. If the directory cannot be deleted, an exception will be raised.
-       
-       If subdir_name is a relative path, it is resolved relative to the the app-specific private root directory.
-       Regardless, it must resolve to the app-specific root directory or a subdirectory of it.
-       For example, "." can be used to refer to the app-specific private root directory itself.
-       
-       Deletion of the shared root directory itself is not allowed.
-    """
-    subdir_fullpath = get_private_dir(subdir_name, app_name=app_name)
-    if subdir_fullpath.is_dir():
-        shutil.rmtree(subdir_fullpath)
-
-def verify_private_dir(subdir_name: str | Path, app_name: str | None = None) -> Path:
-    """Verify that the application-specific user-wide private directory or a subdirectory thereof for storing sensitive data
-       like authentication tokens exists and has permissions 0700. On Linux and MacOS, this will be a directory
-       under ~/.private/{app_name} with mode 0700. On Windows, this will be under the non-roaming app data directory.
-       
-       If the directory does not exist or does not have permissions 0700, an exception will be raised.
-       
-       If subdir_name is a relative path, it is resolved relative to the the app-specific private root directory.
-       Regardless, it must resolve to the app-specific root directory or a subdirectory of it.
-       For example, "." can be used to refer to the app-specific private root directory itself.
-    """
-    return get_private_files_manager(app_name).verify_private_dir(subdir_name)
-
-def get_private_app_file(
-            filename: str | Path,
-            *,
-            create_parent: bool = False,
-            subdir: str | Path = ".",
-            app_name: str | None = None,
-        ) -> Path:
-    """Get the fully qualified path to a file with the given name in the application-specific
-       user-wide private directory for storing sensitive data like authentication tokens.
-       
-       subdir_name is resolved relative to the app-specific private root directory,
-       and filename is resolved relative to subdir_name. The file must resolve to a file within the
-       specified subdirectory, or a ValueError will be raised.
-       
-       If create_parent is True, the parent directory/directories, up to and including the application-specific root
-       directory, will be created if they do not already exist, and their permissions will be adjusted to 0700.
-       
-       If create_parent is False, the directory is not created but the existence and permissions of
-       all parent directories are verified.
-       
-       The file itself is not created, and no guarantees are made about its existence or permissions."""
-    return get_private_files_manager(app_name).get_private_file(
-            filename=filename,
-            create_parent=create_parent,
-            subdir=subdir,
-        )
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: OpenTextMode, *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs: Any
-    ) -> TextIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: OpenBinaryMode, *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs: Any
-    ) -> BinaryIO: ...
-
-@overload
-def open_private_app_file(
-        filename: str | Path, mode: str, *, subdir: str | Path = ".",
-        create_parent: bool = False, app_name: str | None = None, **kwargs: Any
-    ) -> IO[Any]: ...
-
-def open_private_app_file(
-            filename: str | Path,
-            mode: str = "r",
-            *,
-            subdir: str | Path = ".",
-            create_parent: bool = False,
-            app_name: str | None = None,
-            **kwargs: Any
-        ) -> IO[Any]:
-    """Open a file with the given name in the application-specific user-wide private directory and subdirectory,
-       creating the directory if necessary. This is a convenience wrapper around get_private_app_file and open."""
-    return get_private_files_manager(app_name).open(
-            filename=filename,
-            mode=mode,
-            subdir=subdir,
-            create_parent=create_parent,
-            **kwargs
-        )

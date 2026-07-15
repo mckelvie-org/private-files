@@ -28,14 +28,15 @@ files it creates so secrets are never accidentally left group- or world-readable
 - **Path-traversal safe.** Subdirectory and filename arguments are resolved and checked to ensure they
   stay within the intended app directory &mdash; a `subdir` or `filename` of `"../../etc/passwd"` raises
   `ValueError` instead of silently escaping the sandbox.
-- **Two equivalent APIs.** A `PrivateFilesManager` class for when you're working with one application
-  repeatedly (it caches the resolved paths), and a set of flat module-level functions for one-off calls,
-  both backed by the same cached manager instances.
-- **Drop-in `open()` replacement.** `open_private_app_file()` / `PrivateFilesManager.open()` behave like
-  the builtin `open()` &mdash; including `@overload`-based mode-based return-type inference (`TextIO` vs
-  `BinaryIO`) &mdash; but resolve the path into the private directory and create parent directories and
-  fix file permissions automatically.
-- **Fully typed**, `mypy --strict` clean, zero required dependencies beyond `platformdirs`.
+- **Optional passphrase encryption.** `PrivateFilesManager.open()` can transparently encrypt a file at
+  rest with a passphrase (Argon2id key derivation + AES-256-GCM authenticated encryption), with normal
+  read/write/seek/append/update semantics.
+- **Drop-in `open()` replacement.** `PrivateFilesManager.open()` behaves like the builtin `open()`
+  &mdash; including `@overload`-based mode-based return-type inference (`TextIO` vs `BinaryIO`) &mdash;
+  but resolves the path into the private directory and creates parent directories and fixes file
+  permissions automatically.
+- **Fully typed**, `mypy --strict` clean, zero required dependencies beyond `platformdirs` and
+  `cryptography`.
 
 ## Installation
 
@@ -46,43 +47,35 @@ pip install private-files
 ## Quick Start
 
 ```python
-from private_files import open_private_app_file, get_private_app_dir
+from private_files import private_files
+
+files = private_files(app_name="myapp")
 
 # Write a secret. Parent directories are created automatically (mode 0700),
 # and the file itself ends up with mode 0600.
-with open_private_app_file("api-token.txt", "w", app_name="myapp") as f:
+with files.open("api-token.txt", "w") as f:
     f.write("super-secret-token")
 
 # Read it back later.
-with open_private_app_file("api-token.txt", "r", app_name="myapp") as f:
+with files.open("api-token.txt", "r") as f:
     token = f.read()
 
 # Find out where it lives on disk, without opening it.
-print(get_private_app_dir(app_name="myapp"))
+print(files.get_root_dir())
 # -> /home/alice/.private/myapp   (Linux/macOS)
 # -> C:\Users\alice\AppData\Local\myapp\myapp   (Windows)
 ```
 
-If your application makes several calls, prefer a `PrivateFilesManager`, which resolves and caches its
-paths once instead of on every call:
+`private_files(app_name)` returns a process-wide cached `PrivateFilesManager` for a given `app_name` --
+repeated calls with the same `app_name` return the same instance, reusing its already-resolved,
+already-verified paths. You can also construct a `PrivateFilesManager` directly (e.g. to bypass the
+cache, or if you're only ever going to use one `app_name` and would rather hold a local reference):
 
 ```python
 from private_files import PrivateFilesManager
 
 files = PrivateFilesManager(app_name="myapp")
-
-with files.open("api-token.txt", "w") as f:
-    f.write("super-secret-token")
-
-with files.open("session/cookies.json", "w", create_parent=True) as f:
-    f.write("{}")
-
-files.delete_private_dir("session")
 ```
-
-`get_private_files_manager(app_name)` returns a process-wide cached `PrivateFilesManager` for a given
-`app_name`, which is what all of the flat module-level functions use internally &mdash; so mixing the two
-styles for the same `app_name` shares the same cached, verified paths.
 
 ## Concepts
 
@@ -113,7 +106,47 @@ All `subdir` and `filename` arguments are resolved and checked against the direc
 be contained within; anything that would resolve outside of it (via `..`, absolute paths outside the
 tree, symlinks, etc.) raises `ValueError` rather than being silently permitted.
 
+### Passphrase encryption
+
+`open()` accepts an optional `passphrase`. When given, the file is encrypted at rest: a key is derived
+from the passphrase with Argon2id (deliberately expensive, to slow down dictionary/brute-force attacks),
+and the content is sealed with AES-256-GCM authenticated encryption. Encryption/decryption happens as a
+whole (in memory) rather than streamed, so every mode -- including `"r+"`, `"a"`/`"a+"`, and arbitrary
+`seek()` -- works normally; there are no seek restrictions.
+
+```python
+with files.open("secret.json", "w", passphrase="correct horse battery staple") as f:
+    f.write('{"token": "abc123"}')
+
+with files.open("secret.json", "r", passphrase="correct horse battery staple") as f:
+    data = f.read()
+```
+
+Reading an encrypted file with the wrong passphrase, or a plaintext file with a passphrase given, raises
+`DecryptionError` (or a more specific subclass: `PassphraseRequiredError`, `NotEncryptedError`). By
+default, reading an encrypted file *without* a passphrase is not blocked -- you get the raw ciphertext
+bytes back, e.g. to copy or back the file up. Pass `check_encryption=True` to instead raise
+`PassphraseRequiredError` up front if the file looks encrypted:
+
+```python
+from private_files import PassphraseRequiredError
+
+try:
+    files.open("secret.json", "r", check_encryption=True)
+except PassphraseRequiredError:
+    print("this file needs a passphrase")
+```
+
+`files.looks_encrypted("secret.json")` answers the same question directly, without opening the file or
+needing a passphrase (it just peeks at the file's header). It returns `False` for files that don't exist.
+
 ## API Reference
+
+### `private_files(app_name=None) -> PrivateFilesManager`
+
+The package's single entry point. Returns a cached `PrivateFilesManager` for the given `app_name` (or the
+shared root itself, if `app_name` is `None`) -- repeated calls with the same `app_name` return the same
+instance.
 
 ### `PrivateFilesManager`
 
@@ -136,56 +169,38 @@ directory paths across calls.
 | `delete_private_dir(subdir) -> None` | Recursively delete `subdir`. No-op if it doesn't exist. Raises `ValueError` if `subdir` resolves to the shared root itself. |
 | `verify_private_dir(subdir) -> Path` | Raise `NotADirectoryError`/`PermissionError` unless `subdir` (and everything above it, up to the shared root) exists with mode `0700`. |
 | `get_private_file(filename, *, create_parent=False, subdir=".") -> Path` | Resolve the full path to a file. Verifies (or creates, if `create_parent=True`) its parent directory. The file itself is never created. |
-| `open(filename, mode="r", *, subdir=".", create_parent=False, **kwargs) -> IO` | Like builtin `open()`, but resolved into the app directory. Parent directories are auto-created for write/append/exclusive-create modes (or when `create_parent=True`); files opened for writing get mode `0600`. |
+| `looks_encrypted(filename, *, subdir=".") -> bool` | Peek at a file's header to see if it looks passphrase-encrypted, without needing a passphrase. `False` if the file doesn't exist. |
+| `open(filename, mode="r", *, subdir=".", create_parent=False, passphrase=None, check_encryption=False, **kwargs) -> IO` | Like builtin `open()`, but resolved into the app directory. Parent directories are auto-created for write/append/exclusive-create modes (or when `create_parent=True`); files opened for writing get mode `0600`. See [Passphrase encryption](#passphrase-encryption) for `passphrase`/`check_encryption`. |
 
 `subdir="."` refers to the app directory itself. All `subdir`/`filename` parameters accept `str | Path`.
 
-### Module-level functions
+### Exceptions
 
-Thin wrappers around a cached `PrivateFilesManager` per `app_name`, for callers that don't want to hold
-onto a manager instance themselves:
-
-| Function | Equivalent to |
+| Exception | Raised when |
 | --- | --- |
-| `get_shared_private_dir() -> Path` | `PrivateFilesManager().get_shared_root_dir()` |
-| `create_shared_private_dir() -> Path` | `PrivateFilesManager().create_shared_root_dir()` |
-| `get_private_files_manager(app_name=None) -> PrivateFilesManager` | Returns the cached manager for `app_name`. |
-| `get_private_app_dir(app_name=None) -> Path` | `manager.get_root_dir()` |
-| `create_private_app_dir(app_name=None) -> Path` | `manager.create_root_dir()` |
-| `get_private_dir(subdir, app_name=None) -> Path` | `manager.get_private_dir(subdir)` |
-| `create_private_dir(subdir, app_name=None) -> Path` | `manager.create_private_dir(subdir)` |
-| `delete_private_dir(subdir_name, app_name) -> None` | `manager.delete_private_dir(subdir_name)` |
-| `verify_private_dir(subdir_name, app_name=None) -> Path` | `manager.verify_private_dir(subdir_name)` |
-| `get_private_app_file(filename, *, create_parent=False, subdir=".", app_name=None) -> Path` | `manager.get_private_file(...)` |
-| `open_private_app_file(filename, mode="r", *, subdir=".", create_parent=False, app_name=None, **kwargs) -> IO` | `manager.open(...)` |
-
-`get_private_files_manager(app_name)` is `@functools.cache`d, so repeated calls with the same `app_name`
-(directly, or indirectly via any of the flat functions above) return the same manager instance and reuse
-its already-resolved, already-verified paths. This means the *first* successful resolution of a given
-`app_name`'s directory sticks for the lifetime of the process, even if the underlying shared root were to
-change (e.g. `$HOME` changing at runtime) &mdash; construct a fresh `PrivateFilesManager` directly if you
-need to bypass the cache.
+| `DecryptionError` (`ValueError`) | Base class for all decryption failures: wrong passphrase, corrupted/tampered/truncated data, or an unsupported format version. |
+| `NotEncryptedError` (`DecryptionError`) | A `passphrase` was given, but the file doesn't have this package's encrypted-file header. |
+| `PassphraseRequiredError` (`DecryptionError`) | `check_encryption=True` and the file looks encrypted, but no `passphrase` was given. |
 
 ## Examples
 
 ### Reading and writing binary data
 
 ```python
-from private_files import open_private_app_file
+from private_files import private_files
 
-with open_private_app_file("cache.bin", "wb", app_name="myapp") as f:
+files = private_files(app_name="myapp")
+
+with files.open("cache.bin", "wb") as f:
     f.write(b"\x00\x01\x02")
 
-with open_private_app_file("cache.bin", "rb", app_name="myapp") as f:
+with files.open("cache.bin", "rb") as f:
     data = f.read()
 ```
 
 ### Nested subdirectories
 
 ```python
-from private_files import PrivateFilesManager
-
-files = PrivateFilesManager(app_name="myapp")
 files.create_private_dir("sessions/2024")  # creates both levels, each mode 0700
 path = files.get_private_dir("sessions/2024")
 ```
@@ -193,10 +208,8 @@ path = files.get_private_dir("sessions/2024")
 ### Checking a directory without creating it
 
 ```python
-from private_files import verify_private_dir
-
 try:
-    verify_private_dir("sessions", app_name="myapp")
+    files.verify_private_dir("sessions")
 except (NotADirectoryError, PermissionError) as e:
     print(f"not ready: {e}")
 ```
@@ -204,10 +217,8 @@ except (NotADirectoryError, PermissionError) as e:
 ### Cleaning up
 
 ```python
-from private_files import delete_private_dir
-
 # Removes the directory and everything under it. No error if it doesn't exist.
-delete_private_dir("sessions", app_name="myapp")
+files.delete_private_dir("sessions")
 ```
 
 ## Supported Python Versions

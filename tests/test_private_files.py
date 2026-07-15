@@ -281,53 +281,20 @@ def test_open_explicit_create_parent_overrides_mode_inference(sandbox_root: Path
     assert (manager.get_root_dir() / "a" / "b").is_dir()
 
 
-# --- get_private_files_manager ---
+# --- private_files() ---
 
 
-def test_get_private_files_manager_is_cached_per_app_name(sandbox_root: Path) -> None:
-    first = pf.get_private_files_manager(APP_NAME)
-    second = pf.get_private_files_manager(APP_NAME)
+def test_private_files_is_cached_per_app_name(sandbox_root: Path) -> None:
+    first = pf.private_files(APP_NAME)
+    second = pf.private_files(APP_NAME)
     assert first is second
 
 
-def test_get_private_files_manager_distinct_per_app_name(sandbox_root: Path) -> None:
-    a = pf.get_private_files_manager("app-a")
-    b = pf.get_private_files_manager("app-b")
+def test_private_files_distinct_per_app_name(sandbox_root: Path) -> None:
+    a = pf.private_files("app-a")
+    b = pf.private_files("app-b")
     assert a is not b
     assert a.get_root_dir() != b.get_root_dir()
-
-
-# --- module-level convenience wrappers ---
-
-
-def test_get_private_app_dir_matches_manager(sandbox_root: Path) -> None:
-    assert pf.get_private_app_dir(APP_NAME) == pf.get_private_files_manager(APP_NAME).get_root_dir()
-
-
-def test_create_private_app_dir_matches_manager(sandbox_root: Path) -> None:
-    assert pf.create_private_app_dir(APP_NAME) == pf.get_private_files_manager(APP_NAME).get_root_dir()
-    assert _mode(pf.get_private_app_dir(APP_NAME)) == 0o700
-
-
-def test_module_level_dir_lifecycle(sandbox_root: Path) -> None:
-    created = pf.create_private_dir("a/b", app_name=APP_NAME)
-    assert created.is_dir()
-    assert pf.get_private_dir("a/b", app_name=APP_NAME) == created
-    assert pf.verify_private_dir("a/b", app_name=APP_NAME) == created
-    pf.delete_private_dir("a", app_name=APP_NAME)
-    assert not (pf.get_private_app_dir(APP_NAME) / "a").exists()
-
-
-def test_module_level_get_private_app_file(sandbox_root: Path) -> None:
-    file_path = pf.get_private_app_file("secret.txt", create_parent=True, app_name=APP_NAME)
-    assert file_path == pf.get_private_app_dir(APP_NAME) / "secret.txt"
-
-
-def test_module_level_open_private_app_file_round_trip(sandbox_root: Path) -> None:
-    with pf.open_private_app_file("secret.txt", "w", app_name=APP_NAME) as f:
-        f.write("hello world")
-    with pf.open_private_app_file("secret.txt", "r", app_name=APP_NAME) as f:
-        assert f.read() == "hello world"
 
 
 def test_all_exports_are_importable() -> None:
