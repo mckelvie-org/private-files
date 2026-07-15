@@ -4,7 +4,7 @@ build-backend = "pdm.backend"
 
 [project]
 name = "private-files"
-version = "2.1.0-dev.2"
+version = "2.1.0-rc.4"
 description = "Manage secret/private files in an os-independent way"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -49,7 +49,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/mckelvie-org/private-files"
-Source = "https://github.com/mckelvie-org/private-files"
+Source = "https://github.com/mckelvie-org/private-files/tree/v2.1.0-rc.4"
 "Bug Tracker" = "https://github.com/mckelvie-org/private-files/issues"
 Changelog = "https://github.com/mckelvie-org/private-files/releases"
 
