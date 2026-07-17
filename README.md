@@ -31,6 +31,10 @@ files it creates so secrets are never accidentally left group- or world-readable
 - **Optional passphrase encryption.** `PrivateFilesManager.open()` can transparently encrypt a file at
   rest with a passphrase (Argon2id key derivation + AES-256-GCM authenticated encryption), with normal
   read/write/seek/append/update semantics.
+- **Optional atomic updates.** `PrivateFilesManager.open(..., atomic_update=True)` writes through a
+  temporary file and renames it over the target only on a successful close, so the target is never left
+  partially written. The returned file also gets an `abort()` method to deliberately discard a write in
+  progress.
 - **Drop-in `open()` replacement.** `PrivateFilesManager.open()` behaves like the builtin `open()`
   &mdash; including `@overload`-based mode-based return-type inference (`TextIO` vs `BinaryIO`) &mdash;
   but resolves the path into the private directory and creates parent directories and fixes file
@@ -140,6 +144,46 @@ except PassphraseRequiredError:
 `files.looks_encrypted("secret.json")` answers the same question directly, without opening the file or
 needing a passphrase (it just peeks at the file's header). It returns `False` for files that don't exist.
 
+### Atomic updates
+
+`open()` accepts an optional `atomic_update`. When `True` and the file is opened for writing, the new
+content is written to a temporary file (`filename` + `temp_file_extension`, default `.tmp`) and only
+renamed over the target once the file is closed successfully -- the target is never left partially
+written. This is fully atomic on Linux/macOS (`os.replace()` is atomic there); on Windows there's a brief
+window where the target is removed before the temp file is renamed into its place.
+
+```python
+with files.open("config.json", "w", atomic_update=True) as f:
+    f.write('{"setting": "value"}')
+```
+
+The returned file also has an `abort()` method: calling it marks the pending write to be discarded
+instead of committed the next time the file is closed. This happens automatically if a `with` block exits
+because of an exception, or if the file is garbage-collected without ever having been explicitly closed --
+in both cases the target is left untouched. You can also call `abort()` yourself, e.g. to bail out of a
+write you've decided not to keep, without needing to raise an exception to trigger it:
+
+```python
+with files.open("config.json", "w", atomic_update=True) as f:
+    f.write(build_config())
+    if not looks_valid(f.getvalue()):
+        f.abort()  # target is left untouched
+```
+
+Without `atomic_update`, `abort()` is still available (whenever a `passphrase` is given, or when
+`atomic_update=True` was passed but had no effect -- see below), but the target may already have been
+truncated as a side effect of opening it in `"w"`/`"x"` mode, so aborting leaves an empty file rather than
+the original content; update/append modes (`"r+"`, `"a"`, `"a+"`) are never touched until a successful
+close, so aborting those does leave the original content intact. `atomic_update` avoids this asymmetry
+entirely, since the target isn't touched at all until a fully-written temp file is ready to replace it.
+
+`abort()` is a harmless no-op on a read-only open, since there's nothing pending to discard.
+
+When `atomic_update=True` is passed explicitly, `open()`'s return type is `AbortableTextIO` /
+`AbortableBinaryIO` (both exported from the package) instead of plain `TextIO`/`BinaryIO`, so `abort()`
+is available on the result without a cast. In the `passphrase`-only case above (no `atomic_update`),
+`abort()` is present at runtime but the static return type stays plain `TextIO`/`BinaryIO`.
+
 ## API Reference
 
 ### `get_private_files(app_name=None) -> PrivateFilesManager`
@@ -170,7 +214,7 @@ directory paths across calls.
 | `verify_private_dir(subdir) -> Path` | Raise `NotADirectoryError`/`PermissionError` unless `subdir` (and everything above it, up to the shared root) exists with mode `0700`. |
 | `get_private_file(filename, *, create_parent=False, subdir=".") -> Path` | Resolve the full path to a file. Verifies (or creates, if `create_parent=True`) its parent directory. The file itself is never created. |
 | `looks_encrypted(filename, *, subdir=".") -> bool` | Peek at a file's header to see if it looks passphrase-encrypted, without needing a passphrase. `False` if the file doesn't exist. |
-| `open(filename, mode="r", *, subdir=".", create_parent=False, passphrase=None, check_encryption=False, **kwargs) -> IO` | Like builtin `open()`, but resolved into the app directory. Parent directories are auto-created for write/append/exclusive-create modes (or when `create_parent=True`); files opened for writing get mode `0600`. See [Passphrase encryption](#passphrase-encryption) for `passphrase`/`check_encryption`. |
+| `open(filename, mode="r", *, subdir=".", create_parent=False, passphrase=None, check_encryption=False, atomic_update=False, temp_file_extension=".tmp", **kwargs) -> IO` | Like builtin `open()`, but resolved into the app directory. Parent directories are auto-created for write/append/exclusive-create modes (or when `create_parent=True`); files opened for writing get mode `0600`. See [Passphrase encryption](#passphrase-encryption) for `passphrase`/`check_encryption`, and [Atomic updates](#atomic-updates) for `atomic_update`/`temp_file_extension` and the returned object's `abort()` method. |
 
 `subdir="."` refers to the app directory itself. All `subdir`/`filename` parameters accept `str | Path`.
 

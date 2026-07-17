@@ -4,12 +4,15 @@ General pytest tests for this package.
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 import pytest
 
 import private_files as pf
+import private_files.private_files_manager as pf_manager
+import private_files.util as pf_util
 
 pytestmark = pytest.mark.skipif(
         sys.platform == "win32", reason="tests target the UNIX private-dir implementation and its permission model"
@@ -27,14 +30,14 @@ def sandbox_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """Redirect the shared private-dir root to a temp directory and clear the memoized
     caches (module-level and manager-level) so each test starts from a clean, isolated state."""
     root = tmp_path / ".private"
-    monkeypatch.setattr(pf, "UNIX_PRIVATE_DIR_ROOT_PATH", root)
-    pf._get_shared_private_dir.cache_clear()
-    pf._create_shared_private_dir.cache_clear()
-    pf._get_private_files_manager.cache_clear()
+    monkeypatch.setattr(pf_util, "UNIX_PRIVATE_DIR_ROOT_PATH", root)
+    pf_util._get_shared_private_dir.cache_clear()
+    pf_util._create_shared_private_dir.cache_clear()
+    pf_manager._get_private_files_manager.cache_clear()
     yield root
-    pf._get_shared_private_dir.cache_clear()
-    pf._create_shared_private_dir.cache_clear()
-    pf._get_private_files_manager.cache_clear()
+    pf_util._get_shared_private_dir.cache_clear()
+    pf_util._create_shared_private_dir.cache_clear()
+    pf_manager._get_private_files_manager.cache_clear()
 
 
 @pytest.fixture
@@ -279,6 +282,177 @@ def test_open_explicit_create_parent_overrides_mode_inference(sandbox_root: Path
     with pytest.raises(FileNotFoundError):
         manager.open("secret.txt", "r", subdir="a/b", create_parent=True)
     assert (manager.get_root_dir() / "a" / "b").is_dir()
+
+
+# --- PrivateFilesManager: open() passphrase encryption ---
+
+
+def test_open_passphrase_round_trip(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    with manager.open("secret.txt", "w", passphrase="hunter2") as f:
+        f.write("top secret")
+    with manager.open("secret.txt", "r", passphrase="hunter2") as f:
+        assert f.read() == "top secret"
+
+
+def test_open_passphrase_writes_encrypted_bytes_on_disk(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    with manager.open("secret.txt", "w", passphrase="hunter2") as f:
+        f.write("top secret")
+    raw = manager.get_private_file("secret.txt").read_bytes()
+    assert b"top secret" not in raw
+    assert manager.looks_encrypted("secret.txt")
+
+
+def test_open_wrong_passphrase_raises_decryption_error(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    with manager.open("secret.txt", "w", passphrase="hunter2") as f:
+        f.write("top secret")
+    with pytest.raises(pf.DecryptionError):
+        manager.open("secret.txt", "r", passphrase="wrong")
+
+
+def test_open_check_encryption_false_by_default_returns_ciphertext(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    with manager.open("secret.txt", "w", passphrase="hunter2") as f:
+        f.write("top secret")
+    with manager.open("secret.txt", "rb") as f:
+        assert f.read().startswith(b"PRVFILE")
+
+
+def test_open_check_encryption_without_passphrase_raises(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    with manager.open("secret.txt", "w", passphrase="hunter2") as f:
+        f.write("top secret")
+    with pytest.raises(pf.PassphraseRequiredError):
+        manager.open("secret.txt", "r", check_encryption=True)
+
+
+def test_open_check_encryption_with_atomic_update_and_no_passphrase_still_raises(
+            sandbox_root: Path, manager: pf.PrivateFilesManager
+        ) -> None:
+    # Regression test: atomic_update alone routes through the wrapper (independently of
+    # passphrase), so check_encryption must not be silently skipped in that combination.
+    with manager.open("secret.txt", "w", passphrase="hunter2") as f:
+        f.write("top secret")
+    with pytest.raises(pf.PassphraseRequiredError):
+        manager.open("secret.txt", "r", atomic_update=True, check_encryption=True)
+
+
+# --- PrivateFilesManager: open() atomic_update ---
+
+
+def test_open_atomic_update_write_then_read_round_trip(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    with manager.open("secret.txt", "w", atomic_update=True) as f:
+        f.write("hello atomic")
+    with manager.open("secret.txt", "r") as f:
+        assert f.read() == "hello atomic"
+
+
+def test_open_atomic_update_does_not_leave_temp_file_behind(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    with manager.open("secret.txt", "w", atomic_update=True) as f:
+        f.write("hello atomic")
+    file_path = manager.get_private_file("secret.txt")
+    assert not file_path.with_name(file_path.name + ".tmp").exists()
+
+
+def test_open_atomic_update_leaves_target_untouched_until_close(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    file_path = manager.get_private_file("secret.txt", create_parent=True)
+    file_path.write_text("original")
+    f = manager.open("secret.txt", "w", atomic_update=True)
+    f.write("new content")
+    assert file_path.read_text() == "original"
+    f.close()
+    assert file_path.read_text() == "new content"
+
+
+def test_open_atomic_update_exclusive_mode_raises_if_exists(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    with manager.open("secret.txt", "w") as f:
+        f.write("existing")
+    with pytest.raises(FileExistsError):
+        manager.open("secret.txt", "x", atomic_update=True)
+    with manager.open("secret.txt", "r") as f:
+        assert f.read() == "existing"
+
+
+def test_open_atomic_update_append_round_trip(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    with manager.open("secret.txt", "w") as f:
+        f.write("hello ")
+    with manager.open("secret.txt", "a", atomic_update=True) as f:
+        f.write("world")
+    with manager.open("secret.txt", "r") as f:
+        assert f.read() == "hello world"
+
+
+def test_open_atomic_update_with_passphrase_round_trip(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    with manager.open("secret.txt", "w", atomic_update=True, passphrase="hunter2") as f:
+        f.write("top secret")
+    with manager.open("secret.txt", "r", passphrase="hunter2") as f:
+        assert f.read() == "top secret"
+
+
+def test_open_atomic_update_cleans_up_temp_file_on_replace_failure(
+            sandbox_root: Path, manager: pf.PrivateFilesManager, monkeypatch: pytest.MonkeyPatch
+        ) -> None:
+    def failing_replace(src: object, dst: object) -> None:
+        raise OSError("simulated failure")
+
+    monkeypatch.setattr(os, "replace", failing_replace)
+    f = manager.open("secret.txt", "w", atomic_update=True)
+    f.write("data")
+    with pytest.raises(OSError):
+        f.close()
+    file_path = manager.get_private_file("secret.txt")
+    assert not file_path.exists()
+    assert not file_path.with_name(file_path.name + ".tmp").exists()
+
+
+def test_open_atomic_update_explicit_abort_discards_write(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    file_path = manager.get_private_file("secret.txt", create_parent=True)
+    file_path.write_text("original")
+    f = manager.open("secret.txt", "w", atomic_update=True)
+    f.write("new content")
+    f.abort()
+    f.close()
+    assert file_path.read_text() == "original"
+    assert not file_path.with_name(file_path.name + ".tmp").exists()
+
+
+def test_open_atomic_update_text_mode_with_block_aborts_on_exception(
+            sandbox_root: Path, manager: pf.PrivateFilesManager
+        ) -> None:
+    # Text mode is the default returned object (an _AbortableTextIOWrapper around WrappedFile),
+    # not a WrappedFile itself -- this exercises that forwarding path specifically.
+    file_path = manager.get_private_file("secret.txt", create_parent=True)
+    file_path.write_text("original")
+    with pytest.raises(RuntimeError), manager.open("secret.txt", "w", atomic_update=True) as f:
+        f.write("partial")
+        raise RuntimeError("boom")
+    assert file_path.read_text() == "original"
+    assert not file_path.with_name(file_path.name + ".tmp").exists()
+
+
+def test_open_atomic_update_binary_mode_with_block_aborts_on_exception(
+            sandbox_root: Path, manager: pf.PrivateFilesManager
+        ) -> None:
+    file_path = manager.get_private_file("secret.bin", create_parent=True)
+    file_path.write_bytes(b"original")
+    with pytest.raises(RuntimeError), manager.open("secret.bin", "wb", atomic_update=True) as f:
+        f.write(b"partial")
+        raise RuntimeError("boom")
+    assert file_path.read_bytes() == b"original"
+    assert not file_path.with_name(file_path.name + ".tmp").exists()
+
+
+def test_open_non_atomic_with_block_aborts_on_exception_preserves_original(
+            sandbox_root: Path, manager: pf.PrivateFilesManager
+        ) -> None:
+    # "r+" with no atomic_update and a passphrase forces WrappedFile's non-atomic branch (deferred
+    # in-place writeback to the real file handle at close()), as opposed to the atomic_update
+    # branch exercised by the tests above.
+    with manager.open("secret.txt", "w", passphrase="hunter2") as f:
+        f.write("original")
+    with pytest.raises(RuntimeError), manager.open("secret.txt", "r+", passphrase="hunter2") as f:
+        f.seek(0)
+        f.write("partial")
+        raise RuntimeError("boom")
+    with manager.open("secret.txt", "r", passphrase="hunter2") as f:
+        assert f.read() == "original"
 
 
 # --- get_private_files() ---

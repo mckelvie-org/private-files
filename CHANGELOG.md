@@ -1,5 +1,22 @@
 # CHANGELOG
 
+## [3.0.1]
+
+### Added
+
+- `atomic_update=True` on `PrivateFilesManager.open()`: writes go to a temporary file
+  (`filename` + `temp_file_extension`, default `.tmp`) first, which is renamed over the target
+  only once the file is closed successfully, so the target is never left partially written. Fully
+  atomic on Linux/macOS; on Windows there's a brief window where the target is removed before the
+  temp file is renamed into place. Has no effect on modes that don't write (e.g. plain `"r"`).
+- `abort()` on the file object returned by `open()`: marks the pending write to be discarded
+  instead of committed on the next close. This is triggered automatically if a `with` block exits
+  because of an exception, or if the file is garbage-collected without ever having been closed --
+  in both cases nothing further needs to be done by the caller. It can also be called explicitly
+  to deliberately discard a write in progress without raising an exception to trigger it.
+- `AbortableTextIO` / `AbortableBinaryIO`: the return type of `open()` when `atomic_update=True`
+  is passed explicitly, so `abort()` is available without a cast. Exported at the package level.
+
 ## [3.0.0]
 
 ### Changed
