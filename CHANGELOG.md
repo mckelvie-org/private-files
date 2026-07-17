@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 3.0.2 (unreleased)
+## 3.0.2 (2026-07-17)
 
 - _Add release notes here._
 
