@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 3.0.2 (unreleased)
+
+- _Add release notes here._
+
 ## [3.0.1]
 
 ### Added
