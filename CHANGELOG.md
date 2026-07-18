@@ -1,5 +1,39 @@
 # CHANGELOG
 
+## [3.1.0]
+
+### Added
+
+- `PrivateDirManager`: `PrivateFilesManager`'s directory-walking, creation, and
+  permission-fixing/verifying logic is now factored into this reusable base class, which can be
+  constructed directly against any directory, not just the shared private root -- handy for
+  testing code that uses `PrivateFilesManager` against a throwaway directory.
+- `get_subdir_manager(subdir, create=True) -> PrivateDirManager`: returns a new, independent
+  manager scoped to a subdirectory. It behaves like a full manager rooted at that subdirectory,
+  but never creates, fixes, or verifies permissions on anything at or above it, including the
+  original manager's own root. Pass `create=False` to resolve and validate the subdirectory path
+  without touching the filesystem.
+
+### Changed
+
+- A missing directory (e.g. reading a file without `create_parent=True` when its parent doesn't
+  exist yet) now raises `FileNotFoundError`, distinct from `NotADirectoryError` for a path that
+  exists but isn't a directory.
+- `PrivateFilesManager(app_name=...)` with a path-traversing `app_name` now raises `ValueError`
+  immediately at construction, rather than lazily on the first call that resolves the root
+  directory.
+
+### Removed
+
+- `PrivateFilesManager.create_shared_root_dir()`. Creating (and locking down) the shared root is
+  now an automatic side effect of `create_root_dir()`. `get_shared_root_dir()` is unaffected.
+
+### Fixed
+
+- The shared root's own permissions were silently never verified by `verify_private_dir()`
+  (it walked using the wrong stop-path field internally), contradicting the documented "checked,
+  but never silently fixed" contract for the shared root.
+
 ## [3.0.1]
 
 ### Added

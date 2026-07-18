@@ -52,17 +52,18 @@ def test_get_shared_root_dir(sandbox_root: Path, manager: pf.PrivateFilesManager
     assert manager.get_shared_root_dir() == sandbox_root.resolve()
 
 
-def test_create_shared_root_dir_creates_and_locks_down(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
-    shared_dir = manager.create_shared_root_dir()
+def test_create_root_dir_also_creates_and_locks_down_shared_root(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    manager.create_root_dir()
+    shared_dir = manager.get_shared_root_dir()
     assert shared_dir.is_dir()
     assert _mode(shared_dir) == 0o700
 
 
-def test_create_shared_root_dir_rejects_bad_permissions(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+def test_create_root_dir_rejects_bad_shared_root_permissions(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
     sandbox_root.mkdir(mode=0o700, parents=True)
     sandbox_root.chmod(0o755)
     with pytest.raises(PermissionError):
-        manager.create_shared_root_dir()
+        manager.create_root_dir()
 
 
 # --- PrivateFilesManager: app-specific root ---
@@ -78,9 +79,10 @@ def test_get_root_dir_without_app_name_is_shared_root(sandbox_root: Path) -> Non
 
 
 def test_get_root_dir_rejects_app_name_traversal(sandbox_root: Path) -> None:
-    mgr = pf.PrivateFilesManager(app_name="../escape")
+    # Validated eagerly in __init__ now, since the base class needs its stop-scan paths resolved
+    # at construction time regardless.
     with pytest.raises(ValueError):
-        mgr.get_root_dir()
+        pf.PrivateFilesManager(app_name="../escape")
 
 
 def test_get_root_dir_is_cached_per_instance(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
@@ -100,7 +102,7 @@ def test_create_root_dir_creates_nested_path_with_locked_permissions(sandbox_roo
 def test_create_root_dir_fixes_existing_bad_permissions(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
     root_dir = manager.create_root_dir()
     root_dir.chmod(0o755)
-    manager._root_dir_created = False
+    manager._dir_created = False
     fixed = manager.create_root_dir()
     assert _mode(fixed) == 0o700
 
@@ -192,12 +194,12 @@ def test_verify_private_dir_success(sandbox_root: Path, manager: pf.PrivateFiles
 def test_verify_private_dir_dot_checks_root_itself(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
     # Regression test: verifying "." must still check the app root directory itself,
     # not silently succeed because the walked relative path has zero components.
-    with pytest.raises(NotADirectoryError):
+    with pytest.raises(FileNotFoundError):
         manager.verify_private_dir(".")
 
 
 def test_verify_private_dir_missing_raises(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
-    with pytest.raises(NotADirectoryError):
+    with pytest.raises(FileNotFoundError):
         manager.verify_private_dir("a/b")
 
 
@@ -209,15 +211,52 @@ def test_verify_private_dir_bad_permissions_raises(sandbox_root: Path, manager: 
 
 
 def test_verify_private_dir_rejects_traversal(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    # Root must exist first, or verify_root_dir() raises FileNotFoundError before the traversal
+    # check on subdir is ever reached.
+    manager.create_root_dir()
     with pytest.raises(ValueError):
         manager.verify_private_dir("../escape")
+
+
+# --- PrivateFilesManager: get_subdir_manager() ---
+
+
+def test_get_subdir_manager_creates_by_default(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    sub = manager.get_subdir_manager("a/b")
+    assert sub.get_root_dir() == manager.get_private_dir("a/b")
+    assert sub.get_root_dir().is_dir()
+    assert _mode(sub.get_root_dir()) == 0o700
+
+
+def test_get_subdir_manager_create_false_touches_nothing(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    sub = manager.get_subdir_manager("a/b", create=False)
+    assert sub.get_root_dir() == manager.get_private_dir("a/b")
+    assert not manager.get_root_dir().exists()
+    assert not sub.get_root_dir().exists()
+
+
+def test_get_subdir_manager_is_scoped_to_its_own_subtree(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    sub = manager.get_subdir_manager("a/b")
+    with pytest.raises(ValueError):
+        sub.get_private_dir("../escape")
+    with pytest.raises(ValueError):
+        sub.delete_private_dir(".")
+
+
+def test_get_subdir_manager_files_are_independent_of_parent(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    sub = manager.get_subdir_manager("a/b")
+    with sub.open("secret.txt", "w") as f:
+        f.write("nested secret")
+    with sub.open("secret.txt", "r") as f:
+        assert f.read() == "nested secret"
+    assert (manager.get_private_dir("a/b") / "secret.txt").is_file()
 
 
 # --- PrivateFilesManager: files ---
 
 
 def test_get_private_file_without_create_parent_raises_when_missing(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
-    with pytest.raises(NotADirectoryError):
+    with pytest.raises(FileNotFoundError):
         manager.get_private_file("secret.txt")
 
 
@@ -267,12 +306,12 @@ def test_open_read_missing_file_raises(sandbox_root: Path, manager: pf.PrivateFi
 
 
 def test_open_read_missing_parent_raises(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
-    with pytest.raises(NotADirectoryError):
+    with pytest.raises(FileNotFoundError):
         manager.open("secret.txt", "r")
 
 
 def test_open_read_mode_does_not_force_create_parent(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
-    with pytest.raises(NotADirectoryError):
+    with pytest.raises(FileNotFoundError):
         manager.open("secret.txt", "r", create_parent=False)
 
 

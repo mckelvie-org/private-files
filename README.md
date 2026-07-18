@@ -110,6 +110,28 @@ All `subdir` and `filename` arguments are resolved and checked against the direc
 be contained within; anything that would resolve outside of it (via `..`, absolute paths outside the
 tree, symlinks, etc.) raises `ValueError` rather than being silently permitted.
 
+### Subdirectory managers
+
+`get_subdir_manager(subdir, create=True)` returns a new, independent manager scoped to a subdirectory --
+it behaves exactly like a full manager rooted at that subdirectory (`get_private_dir`, `create_private_dir`,
+`delete_private_dir`, `open`, etc. all work the same way, just relative to the subdirectory instead of the
+original manager's root), but it will never touch anything at or above that subdirectory, including the
+original manager's own root.
+
+```python
+sessions = files.get_subdir_manager("sessions")
+with sessions.open("current.json", "w") as f:
+    f.write('{"user": "alice"}')
+```
+
+By default (`create=True`) both the original manager's root and the subdirectory are created (with
+permissions fixed/verified) if they don't already exist. Pass `create=False` to just resolve and validate
+the subdirectory path without touching the filesystem at all.
+
+This is also handy for testing code that uses `PrivateFilesManager`: since a returned sub-manager is a
+self-contained `PrivateDirManager` rooted anywhere on disk, you can construct one directly against a
+temporary directory in a test, instead of needing to redirect the shared private root.
+
 ### Passphrase encryption
 
 `open()` accepts an optional `passphrase`. When given, the file is encrypted at rest: a key is derived
@@ -205,12 +227,12 @@ directory paths across calls.
 | Method | Description |
 | --- | --- |
 | `get_shared_root_dir() -> Path` | The shared private root (e.g. `~/.private`). Computed, not created. |
-| `create_shared_root_dir() -> Path` | Create the shared root if missing (mode `0700`); raise `PermissionError` if it exists with the wrong mode. |
 | `get_root_dir() -> Path` | This manager's app-specific directory. Computed, not created. |
 | `create_root_dir() -> Path` | Create the app-specific directory (and the shared root, if needed), fixing permissions at every level. |
 | `get_private_dir(subdir) -> Path` | Resolve `subdir` under the app directory. Does not create anything. |
 | `create_private_dir(subdir) -> Path` | Create `subdir` (and every intermediate component) under the app directory, mode `0700`. |
-| `delete_private_dir(subdir) -> None` | Recursively delete `subdir`. No-op if it doesn't exist. Raises `ValueError` if `subdir` resolves to the shared root itself. |
+| `get_subdir_manager(subdir, create=True) -> PrivateDirManager` | Return a new, independent manager scoped to `subdir`, which never touches anything at or above it. See [Subdirectory managers](#subdirectory-managers). |
+| `delete_private_dir(subdir) -> None` | Recursively delete `subdir`. No-op if it doesn't exist. Raises `ValueError` if `subdir` resolves to this manager's own root directory. |
 | `verify_private_dir(subdir) -> Path` | Raise `NotADirectoryError`/`PermissionError` unless `subdir` (and everything above it, up to the shared root) exists with mode `0700`. |
 | `get_private_file(filename, *, create_parent=False, subdir=".") -> Path` | Resolve the full path to a file. Verifies (or creates, if `create_parent=True`) its parent directory. The file itself is never created. |
 | `looks_encrypted(filename, *, subdir=".") -> bool` | Peek at a file's header to see if it looks passphrase-encrypted, without needing a passphrase. `False` if the file doesn't exist. |
