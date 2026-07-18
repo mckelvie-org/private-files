@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## 3.1.0 (unreleased)
+## 3.1.0 (2026-07-18)
 
 - _Add release notes here._
 
