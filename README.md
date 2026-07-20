@@ -15,16 +15,15 @@ files it creates so secrets are never accidentally left group- or world-readable
 
 ## Highlights
 
-- **One shared private root per user.** On Linux and macOS this is `~/.private`; on Windows it's the
-  non-roaming application-data directory (via [`platformdirs`](https://pypi.org/project/platformdirs/)),
-  which is not synced to the cloud or shared across devices.
-- **Per-application subdirectories.** Each app gets its own subdirectory of the shared root, named after
-  an `app_name` you choose, so multiple applications can share the same machine without stepping on each
-  other's secrets.
+- **A private directory per application.** Each `app_name` gets its own locked-down directory:
+  `~/.private/<app_name>` on Linux/macOS, or `%LOCALAPPDATA%\<app_name>\private` on Windows (via
+  [`platformdirs`](https://pypi.org/project/platformdirs/)), following the Windows convention of
+  keeping everything for an app under its own folder. Neither location is synced to the cloud or
+  shared across devices.
 - **Permissions are enforced, not assumed.** Directories created by this package are `chmod 0700`; files
   opened for writing are `chmod 0600`. Existing app-specific directories with the wrong permissions are
-  fixed automatically; the shared root itself is only ever checked, never silently "fixed," since it may
-  be shared with other applications.
+  fixed automatically. On Linux/macOS, the shared `~/.private` root itself is only ever checked, never
+  silently "fixed," since it may be shared with other applications.
 - **Path-traversal safe.** Subdirectory and filename arguments are resolved and checked to ensure they
   stay within the intended app directory &mdash; a `subdir` or `filename` of `"../../etc/passwd"` raises
   `ValueError` instead of silently escaping the sandbox.
@@ -66,8 +65,8 @@ with files.open("api-token.txt", "r") as f:
 
 # Find out where it lives on disk, without opening it.
 print(files.get_root_dir())
-# -> /home/alice/.private/myapp   (Linux/macOS)
-# -> C:\Users\alice\AppData\Local\myapp\myapp   (Windows)
+# -> /home/alice/.private/myapp                    (Linux/macOS)
+# -> C:\Users\alice\AppData\Local\myapp\private     (Windows)
 ```
 
 `get_private_files(app_name)` returns a process-wide cached `PrivateFilesManager` for a given `app_name` --
@@ -83,21 +82,25 @@ files = PrivateFilesManager(app_name="myapp")
 
 ## Concepts
 
-### Shared root vs. app-specific directory
+### Directory layout
 
-There are two levels of directory:
+Each `PrivateFilesManager(app_name=...)` resolves to a single directory named after `app_name` that this
+package fully owns: it creates the directory if missing and actively enforces/repairs `0700` permissions
+on it and any subdirectories you create within it:
 
-- The **shared private root** is one directory per user, shared by every application using this package:
-  `~/.private` on Linux/macOS, or the non-roaming app-data directory on Windows. It must already have
-  (or be given) permissions `0700`. This package will create it if missing but will **not** silently fix
-  its permissions if it already exists with the wrong mode, since it may be shared with other
-  applications you don't control &mdash; instead it raises `PermissionError` so you can decide what to do.
-- The **application-specific directory** is a subdirectory of the shared root named after your `app_name`
-  (e.g. `~/.private/myapp`). Unlike the shared root, this package **does** own it, so it actively enforces
-  and repairs `0700` permissions on it and any subdirectories you create within it.
+- **Linux/macOS**: `~/.private/<app_name>`, a subdirectory of one shared, user-wide root. `~/.private`
+  must already have (or be given) permissions `0700`; this package creates it if missing, but will
+  **not** silently fix its permissions if it already exists with the wrong mode, since it may be shared
+  with other applications you don't control &mdash; instead it raises `PermissionError` so you can decide
+  what to do.
+- **Windows**: `%LOCALAPPDATA%\<app_name>\private`, nested inside that app's own per-user local app-data
+  folder, so deleting `%LOCALAPPDATA%\<app_name>` cleans up an app's private data along with the rest of
+  its data.
 
-Passing `app_name=None` (the default) targets the shared root itself rather than a per-application
-subdirectory.
+`app_name=None` (the default) uses this library's own name, `private_files`, as `app_name` -- a peer of
+every other app's directory, not a parent of them. Direct access to the underlying shared platform
+directory itself (e.g. `~/.private` on Linux/macOS) is only available by constructing a `PrivateDirManager`
+against it directly; see [Subdirectory managers](#subdirectory-managers).
 
 ### Subdirectories and files
 
@@ -130,7 +133,8 @@ the subdirectory path without touching the filesystem at all.
 
 This is also handy for testing code that uses `PrivateFilesManager`: since a returned sub-manager is a
 self-contained `PrivateDirManager` rooted anywhere on disk, you can construct one directly against a
-temporary directory in a test, instead of needing to redirect the shared private root.
+temporary directory in a test, instead of needing to redirect where `PrivateFilesManager` itself stores
+private data.
 
 ### Passphrase encryption
 
@@ -210,8 +214,8 @@ is available on the result without a cast. In the `passphrase`-only case above (
 
 ### `get_private_files(app_name=None) -> PrivateFilesManager`
 
-The package's single entry point. Returns a cached `PrivateFilesManager` for the given `app_name` (or the
-shared root itself, if `app_name` is `None`) -- repeated calls with the same `app_name` return the same
+The package's single entry point. Returns a cached `PrivateFilesManager` for the given `app_name`
+(`DEFAULT_APP_NAME` if `app_name` is `None`) -- repeated calls with the same `app_name` return the same
 instance.
 
 ### `PrivateFilesManager`
@@ -221,19 +225,19 @@ class PrivateFilesManager:
     def __init__(self, app_name: str | None = None): ...
 ```
 
-An object bound to a single `app_name` (or `None` for the shared root) that resolves and caches its
+An object bound to a single `app_name` (`DEFAULT_APP_NAME` if `None`) that resolves and caches its
 directory paths across calls.
 
 | Method | Description |
 | --- | --- |
-| `get_shared_root_dir() -> Path` | The shared private root (e.g. `~/.private`). Computed, not created. |
-| `get_root_dir() -> Path` | This manager's app-specific directory. Computed, not created. |
-| `create_root_dir() -> Path` | Create the app-specific directory (and the shared root, if needed), fixing permissions at every level. |
+| `get_root_dir() -> Path` | This manager's app-specific directory. See [Directory layout](#directory-layout). Computed, not created. |
+| `create_root_dir() -> Path` | Create the app-specific directory (and any parent directories needed to reach it), fixing permissions at every level. |
 | `get_private_dir(subdir) -> Path` | Resolve `subdir` under the app directory. Does not create anything. |
 | `create_private_dir(subdir) -> Path` | Create `subdir` (and every intermediate component) under the app directory, mode `0700`. |
 | `get_subdir_manager(subdir, create=True) -> PrivateDirManager` | Return a new, independent manager scoped to `subdir`, which never touches anything at or above it. See [Subdirectory managers](#subdirectory-managers). |
-| `delete_private_dir(subdir) -> None` | Recursively delete `subdir`. No-op if it doesn't exist. Raises `ValueError` if `subdir` resolves to this manager's own root directory. |
-| `verify_private_dir(subdir) -> Path` | Raise `NotADirectoryError`/`PermissionError` unless `subdir` (and everything above it, up to the shared root) exists with mode `0700`. |
+| `delete_private_dir(subdir) -> None` | Recursively delete `subdir`. Raises `NotADirectoryError` if it doesn't exist, or `ValueError` if `subdir` resolves to this manager's own root directory. |
+| `delete_app_data() -> None` | Completely delete this app's private data directory itself (and everything in it), if it exists. Unlike `delete_private_dir`, this deletes the root directory itself -- for a full uninstall/reset, not routine cleanup. No-op if it doesn't already exist. Only on `PrivateFilesManager`, not `PrivateDirManager`. |
+| `verify_private_dir(subdir) -> Path` | Raise `NotADirectoryError`/`PermissionError` unless `subdir` (and everything above it, up to the top of the directory tree this manager owns) exists with mode `0700`. |
 | `get_private_file(filename, *, create_parent=False, subdir=".") -> Path` | Resolve the full path to a file. Verifies (or creates, if `create_parent=True`) its parent directory. The file itself is never created. |
 | `looks_encrypted(filename, *, subdir=".") -> bool` | Peek at a file's header to see if it looks passphrase-encrypted, without needing a passphrase. `False` if the file doesn't exist. |
 | `open(filename, mode="r", *, subdir=".", create_parent=False, passphrase=None, check_encryption=False, atomic_update=False, temp_file_extension=".tmp", **kwargs) -> IO` | Like builtin `open()`, but resolved into the app directory. Parent directories are auto-created for write/append/exclusive-create modes (or when `create_parent=True`); files opened for writing get mode `0600`. See [Passphrase encryption](#passphrase-encryption) for `passphrase`/`check_encryption`, and [Atomic updates](#atomic-updates) for `atomic_update`/`temp_file_extension` and the returned object's `abort()` method. |

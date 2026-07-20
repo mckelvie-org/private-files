@@ -31,12 +31,10 @@ def sandbox_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     caches (module-level and manager-level) so each test starts from a clean, isolated state."""
     root = tmp_path / ".private"
     monkeypatch.setattr(pf_util, "UNIX_PRIVATE_DIR_ROOT_PATH", root)
-    pf_util._get_shared_private_dir.cache_clear()
-    pf_util._create_shared_private_dir.cache_clear()
+    pf_util._get_base_data_dir.cache_clear()
     pf_manager._get_private_files_manager.cache_clear()
     yield root
-    pf_util._get_shared_private_dir.cache_clear()
-    pf_util._create_shared_private_dir.cache_clear()
+    pf_util._get_base_data_dir.cache_clear()
     pf_manager._get_private_files_manager.cache_clear()
 
 
@@ -48,15 +46,10 @@ def manager(sandbox_root: Path) -> pf.PrivateFilesManager:
 # --- PrivateFilesManager: shared root ---
 
 
-def test_get_shared_root_dir(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
-    assert manager.get_shared_root_dir() == sandbox_root.resolve()
-
-
 def test_create_root_dir_also_creates_and_locks_down_shared_root(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
     manager.create_root_dir()
-    shared_dir = manager.get_shared_root_dir()
-    assert shared_dir.is_dir()
-    assert _mode(shared_dir) == 0o700
+    assert sandbox_root.is_dir()
+    assert _mode(sandbox_root) == 0o700
 
 
 def test_create_root_dir_rejects_bad_shared_root_permissions(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
@@ -73,9 +66,9 @@ def test_get_root_dir_with_app_name(sandbox_root: Path, manager: pf.PrivateFiles
     assert manager.get_root_dir() == (sandbox_root / APP_NAME).resolve()
 
 
-def test_get_root_dir_without_app_name_is_shared_root(sandbox_root: Path) -> None:
+def test_get_root_dir_without_app_name_uses_default_app_name(sandbox_root: Path) -> None:
     mgr = pf.PrivateFilesManager()
-    assert mgr.get_root_dir() == sandbox_root.resolve()
+    assert mgr.get_root_dir() == (sandbox_root / pf.DEFAULT_APP_NAME).resolve()
 
 
 def test_get_root_dir_rejects_app_name_traversal(sandbox_root: Path) -> None:
@@ -164,7 +157,7 @@ def test_delete_private_dir_removes_tree_scoped_to_app(sandbox_root: Path, manag
 
 def test_delete_private_dir_is_scoped_to_the_owning_manager(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
     # Regression test: delete_private_dir must resolve "secret" against this manager's own
-    # app-specific root, not the shared root used by the default (app_name=None) manager.
+    # app-specific root, not some other manager's root.
     other = pf.PrivateFilesManager(app_name="otherapp")
     other.create_private_dir("secret")
     manager.create_private_dir("secret")
@@ -173,7 +166,7 @@ def test_delete_private_dir_is_scoped_to_the_owning_manager(sandbox_root: Path, 
     assert (other.get_root_dir() / "secret").is_dir()
 
 
-def test_delete_private_dir_rejects_deleting_shared_root(sandbox_root: Path) -> None:
+def test_delete_private_dir_rejects_deleting_own_root(sandbox_root: Path) -> None:
     mgr = pf.PrivateFilesManager()
     mgr.create_root_dir()
     with pytest.raises(ValueError):
@@ -183,6 +176,43 @@ def test_delete_private_dir_rejects_deleting_shared_root(sandbox_root: Path) -> 
 def test_delete_private_dir_missing_raises(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
     with pytest.raises(NotADirectoryError):
         manager.delete_private_dir("does-not-exist")
+
+
+def test_delete_app_data_removes_root_and_contents(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    nested = manager.create_private_dir("a/b")
+    (nested / "file.txt").write_text("data")
+    manager.delete_app_data()
+    assert not manager.get_root_dir().exists()
+
+
+def test_delete_app_data_missing_is_a_noop(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    assert not manager.get_root_dir().exists()
+    manager.delete_app_data()  # must not raise
+    assert not manager.get_root_dir().exists()
+
+
+def test_delete_app_data_does_not_affect_other_managers(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    other = pf.PrivateFilesManager(app_name="otherapp")
+    other.create_private_dir(".")
+    manager.create_private_dir(".")
+    manager.delete_app_data()
+    assert not manager.get_root_dir().exists()
+    assert other.get_root_dir().is_dir()
+
+
+def test_delete_app_data_allows_recreation_afterward(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    manager.create_root_dir()
+    manager.delete_app_data()
+    # _dir_created must be reset so a later create doesn't skip straight to the stale
+    # "already created" fast path and then fail the existence check.
+    root_dir = manager.create_root_dir()
+    assert root_dir.is_dir()
+    assert _mode(root_dir) == 0o700
+
+
+def test_delete_app_data_not_available_on_private_dir_manager(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:
+    sub = manager.get_subdir_manager("a")
+    assert not hasattr(sub, "delete_app_data")
 
 
 def test_verify_private_dir_success(sandbox_root: Path, manager: pf.PrivateFilesManager) -> None:

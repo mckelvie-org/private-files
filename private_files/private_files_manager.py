@@ -11,7 +11,7 @@ from functools import cache
 from pathlib import Path
 from typing import IO, Any, BinaryIO, Literal, TextIO, overload
 
-from .util import OpenBinaryMode, OpenTextMode, get_shared_private_dir
+from .util import OpenBinaryMode, OpenTextMode, _get_base_data_dir
 from .wrapper import (
     AbortableBinaryIO,
     AbortableTextIO,
@@ -22,8 +22,10 @@ from .wrapper import (
 )
 
 __all__ =  [
+    "DEFAULT_APP_NAME",
     "NotEncryptedError",
     "PassphraseRequiredError",
+    "PrivateDirManager",
     "PrivateFilesManager",
     "get_private_files",
 ]
@@ -298,10 +300,10 @@ class PrivateDirManager:
             )
 
     def delete_private_dir(self, subdir: str | Path) -> None:
-        """Delete the directory managed by this object, or a subdirectory thereof, if it exists.
+        """Recursively delete the directory managed by this object, or a subdirectory thereof.
 
-        If the directory does not exist, nothing happens. If the directory cannot be deleted, an
-        exception will be raised.
+        Raises NotADirectoryError if it does not exist (or is not a directory). If the directory
+        cannot be deleted, an exception will be raised.
 
         If subdir is a relative path, it is resolved relative to the root directory managed by
         this object. Regardless, it must resolve to that root directory or a subdirectory of it.
@@ -526,39 +528,53 @@ class PrivateDirManager:
             raise
         return f
     
+DEFAULT_APP_NAME: str = "private_files"
+"""The effective app_name used by PrivateFilesManager when app_name=None is passed (or implied) --
+   this library's own name, used as a peer of every other app's directory rather than as their
+   parent. Direct access to the underlying shared platform directory (e.g. ~/.private itself on
+   Linux/MacOS) is only available by constructing a PrivateDirManager against it directly."""
+
+
 class PrivateFilesManager(PrivateDirManager):
     """A class for managing private files and directories for an application."""
-    
+
     app_name: str | None
     """The application name used to create the application-specific private directory.
-       If None, a shared private parent directory not specific to an application is used.."""
-       
-    _shared_root_dir: Path
-    """The cached shared private directory root path."""
-    
+       If None, DEFAULT_APP_NAME is used instead, as a peer of every other app's directory."""
+
     def __init__(self, app_name: str | None = None):
         self.app_name = app_name
-        self._shared_root_dir = get_shared_private_dir()
-        
+        base_dir = _get_base_data_dir()
+        effective_name = app_name if app_name is not None else DEFAULT_APP_NAME
+
         if sys.platform == "win32":
-            # On Windows, we will not create or modify the shared private directory, because it is managed by the OS.
-            parent_create_stop_path = self._shared_root_dir
+            # base_dir (e.g. AppData\Local) is shared by every app on the machine, not a private
+            # location in itself. Each app's private data lives in its own "private" subdirectory,
+            # nested inside that app's own folder, following the Windows convention of one folder
+            # per app under AppData\Local -- so deleting an app's folder deletes its private data
+            # too.
+            dir_path = (base_dir / effective_name / "private").resolve()
+            # base_dir itself always exists and is owned by the OS/user profile; everything below
+            # it is ours to create. Permission fixing/verification is a no-op on Windows anyway.
+            parent_create_stop_path = base_dir
+            parent_fix_permissions_stop_path = base_dir
+            parent_verify_permissions_stop_path = base_dir
         else:
-            # On Linux and MacOS, we will create the shared private directory ("~/.private"),
-            # because it is managed by this library. However we will not modify existing perms
-            parent_create_stop_path = self._shared_root_dir.parent
-            
-        # On all platforms, we will not modify existing perms on the shared private directory,
-        # because it is managed by the OS or the user. However, we will verify that it has the correct
-        # permissions on Linux and MacOS.
-        parent_fix_permissions_stop_path = self._shared_root_dir
-        parent_verify_permissions_stop_path = self._shared_root_dir.parent
-        
-        dir_path = (self._shared_root_dir / (app_name if app_name is not None else ".")).resolve()
-        if not dir_path.is_relative_to(self._shared_root_dir):
+            # On Linux and MacOS, base_dir (~/.private) is itself the shared private root, and
+            # every app (including this library's own DEFAULT_APP_NAME, when app_name=None) gets
+            # its own subdirectory of it -- ~/.private itself is only reachable by constructing a
+            # PrivateDirManager directly against it.
+            dir_path = (base_dir / effective_name).resolve()
+            # We create base_dir itself if missing, but never silently fix its permissions if it
+            # already exists with the wrong mode -- we do, however, verify them.
+            parent_create_stop_path = base_dir.parent
+            parent_fix_permissions_stop_path = base_dir
+            parent_verify_permissions_stop_path = base_dir.parent
+
+        if not dir_path.is_relative_to(base_dir):
             raise ValueError(
                     f"Expected application-specific private directory {str(app_name)!r} to resolve to a path "
-                    f"within the shared private directory {str(self._shared_root_dir)!r}, but it does not."
+                    f"within {str(base_dir)!r}, but it does not."
                 )
         super().__init__(
             dir_path=dir_path,
@@ -566,17 +582,29 @@ class PrivateFilesManager(PrivateDirManager):
             parent_fix_permissions_stop_path=parent_fix_permissions_stop_path,
             parent_verify_permissions_stop_path=parent_verify_permissions_stop_path
         )
-    
-    def get_shared_root_dir(self) -> Path:
-        """Get the name of the shared user-wide private root directory for storing sensitive data like authentication tokens.
-        On linux and macos, this will be ~/.private, which the user can choose to encrypt or protect as needed.
-        On Windows, this will be the non-roaming app data directory.
 
-        Does not create the directory or guarantee any particular permissions, so the returned directory
-        may not be safe for storing sensitive data until create_root_dir has been called.
+    def delete_app_data(self) -> None:
+        """Completely delete this application's private data directory itself, and everything
+        within it, if it exists.
+
+        Unlike delete_private_dir(), which refuses to delete this manager's own root directory,
+        this is specifically for deleting it -- e.g. to fully uninstall an app or reset all of
+        its private data, not for routine cleanup of a subdirectory.
+
+        If the directory does not exist, nothing happens. If it exists but is not a directory
+        (e.g. a file occupies that path), NotADirectoryError is raised.
+
+        After this call, the directory (and any parent directories this manager owns) will be
+        recreated automatically the next time this manager creates or opens a file.
         """
-        return self._shared_root_dir
-        
+        root_dir = self.get_root_dir()
+        if not root_dir.exists():
+            return
+        if not root_dir.is_dir():
+            raise NotADirectoryError(f"Expected {str(root_dir)!r} to be a directory, but it is not.")
+        shutil.rmtree(root_dir)
+        self._dir_created = False
+
 
 @cache
 def _get_private_files_manager(app_name: str | None) -> PrivateFilesManager: # hide the @cache so that it does not screw up type

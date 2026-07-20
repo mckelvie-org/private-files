@@ -4,8 +4,8 @@ Support for management of semnsitiive user-wide application files such as authen
 
 from __future__ import annotations
 
-from .private_files_manager import PrivateFilesManager, get_private_files
-from .util import UNIX_PRIVATE_DIR_ROOT_PATH, OpenBinaryMode, Opener, OpenTextMode, create_shared_private_dir, get_shared_private_dir
+from .private_files_manager import DEFAULT_APP_NAME, PrivateDirManager, PrivateFilesManager, get_private_files
+from .util import UNIX_PRIVATE_DIR_ROOT_PATH, OpenBinaryMode, Opener, OpenTextMode
 from .wrapper import (
     AbortableBinaryIO,
     AbortableTextIO,
@@ -20,14 +20,14 @@ __all__ =  [
     "OpenTextMode",
     "OpenBinaryMode",
     "UNIX_PRIVATE_DIR_ROOT_PATH",
+    "DEFAULT_APP_NAME",
     "Opener",
-    "get_shared_private_dir",
-    "create_shared_private_dir",
     "AbortableTextIO",
     "AbortableBinaryIO",
     "DecryptionError",
     "NotEncryptedError",
     "PassphraseRequiredError",
+    "PrivateDirManager",
     "PrivateFilesManager",
     "get_private_files",
     "looks_encrypted",

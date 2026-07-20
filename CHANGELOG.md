@@ -1,5 +1,45 @@
 # CHANGELOG
 
+## [3.2.0]
+
+### Added
+
+- `PrivateFilesManager.delete_app_data()`: completely deletes this application's private data
+  directory itself (and everything in it), if it exists -- for a full uninstall or reset, unlike
+  `delete_private_dir()`, which refuses to delete a manager's own root. No-op if the directory
+  doesn't already exist. Only defined on `PrivateFilesManager`, not `PrivateDirManager`.
+- `DEFAULT_APP_NAME`: the effective `app_name` (`"private_files"`) used whenever `app_name=None`
+  is passed to `PrivateFilesManager`/`get_private_files()`. Exported at the package level.
+- `PrivateDirManager` is now exported at the package level, since `get_subdir_manager()` returns
+  one and it's useful on its own (e.g. for testing code that uses `PrivateFilesManager` against a
+  throwaway directory, without redirecting where `PrivateFilesManager` itself stores data).
+
+### Changed
+
+- **Windows directory layout**: an app's private directory is now nested inside that app's own
+  per-user local app-data folder, `%LOCALAPPDATA%\<app_name>\private`, instead of
+  `%LOCALAPPDATA%\private_files\<app_name>`. This follows the Windows convention of keeping
+  everything for an app under one folder, so deleting `%LOCALAPPDATA%\<app_name>` now also
+  deletes that app's private data. Linux/macOS (`~/.private/<app_name>`) is unchanged.
+- `app_name=None` now resolves to `DEFAULT_APP_NAME` (`"private_files"`) on every platform, used
+  as a peer of every other app's directory rather than as their parent. Previously, only Windows
+  worked this way -- on Linux/macOS, `app_name=None` resolved directly to `~/.private` itself.
+  Direct access to that shared directory is still possible, just not through the convenience API:
+  construct `PrivateDirManager` against the resolved path directly.
+
+### Removed
+
+- `PrivateFilesManager.get_shared_root_dir()`, and the module-level `get_shared_private_dir()` /
+  `create_shared_private_dir()` functions. All three are now redundant with
+  `get_private_files().get_root_dir()`, and would have been misleading under the new Windows
+  layout, where the underlying base directory (`%LOCALAPPDATA%`) is shared by every app on the
+  machine rather than being a private location in its own right.
+
+### Fixed
+
+- `delete_private_dir()`'s docs claimed it silently no-ops on a missing directory; it has always
+  actually raised `NotADirectoryError`. Docs now match the real (unchanged) behavior.
+
 ## [3.1.0]
 
 ### Added
