@@ -613,4 +613,7 @@ def _get_private_files_manager(app_name: str | None) -> PrivateFilesManager: # h
 
 def get_private_files(app_name: str | None = None) -> PrivateFilesManager:
     """Get a cached PrivateFilesManager instance for the given application name."""
+    if app_name is None:
+        # Canonicalize None to DEFAULT_APP_NAME so that the same singleton cached instance is used.
+        app_name = DEFAULT_APP_NAME
     return _get_private_files_manager(app_name)

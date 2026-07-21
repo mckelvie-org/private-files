@@ -1,5 +1,31 @@
 # CHANGELOG
 
+## {{UNRELEASED}}
+
+### Fixed
+
+- `get_private_files(None)` and `get_private_files(DEFAULT_APP_NAME)` cached and returned two
+  separate `PrivateFilesManager` instances for what is the same underlying directory, since the
+  underlying `@cache` keyed on the literal `app_name` argument (`None` vs `"private_files"`)
+  rather than on the resolved, effective app name. `app_name=None` is now canonicalized to
+  `DEFAULT_APP_NAME` before the cache lookup, so both calls return the same singleton.
+
+### Meta
+
+*(Release tooling only -- no effect on the published package.)*
+
+- `CHANGELOG.md`'s "in progress" heading is now the version-independent sentinel
+  `## {{UNRELEASED}}`, filled in with the actual version and date only when `cut-prod` promotes a
+  release. Previously the heading had to be hand-typed with the target version number
+  (`## X.Y.Z (unreleased)`), which could -- and did, since 3.0.0 -- drift out of sync with
+  `pyproject.toml`'s, causing `cut-rc` to insert a duplicate, never-filled-in placeholder entry
+  into every published release's `CHANGELOG.md`.
+- `publish.yml`'s post-release step now also finalizes `CHANGELOG.md` on `main` itself (mirroring
+  what `cut-prod` already did on the release branch), not just `pyproject.toml`'s dev version --
+  previously `main`'s own copy of a shipped release stayed stuck reading "unreleased" forever.
+- Same changes propagated to the `pypi-template` sibling repo's `bin/cut-rc`, `bin/cut-prod`,
+  `.github/workflows/publish.yml`, and `CONTRIBUTING.md`.
+
 ## [3.2.0]
 
 ### Added

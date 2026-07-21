@@ -123,14 +123,16 @@ with open(readme_path, "w") as f:
     f.write(readme)
 PY
 
-# Prepend an (unreleased) CHANGELOG entry if one doesn't already exist.
-pdm run python - "$RC_VERSION" "$TMP/CHANGELOG.md" <<'PY'
+# Prepend an unreleased CHANGELOG entry if one doesn't already exist. The heading is a
+# version-independent sentinel, not the rc/prod version -- cut-prod fills that in (along with
+# the date) when it promotes this rc, so there's no version string here that could ever drift
+# out of sync with pyproject.toml's.
+pdm run python - "$TMP/CHANGELOG.md" <<'PY'
 import re, sys
-xyz = re.fullmatch(r"(\d+\.\d+\.\d+)-rc\.\d+", sys.argv[1]).group(1)
-path = sys.argv[2]
+path = sys.argv[1]
 with open(path) as f:
     text = f.read()
-header = f"## {xyz} (unreleased)"
+header = "## {{UNRELEASED}}"
 if header not in text:
     entry = f"{header}\n\n- _Add release notes here._\n\n"
     text = re.sub(r"^(# CHANGELOG\n+)", rf"\1{entry}", text)

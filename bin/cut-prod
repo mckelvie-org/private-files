@@ -179,16 +179,17 @@ with open(readme_path, "w") as f:
     f.write(readme)
 PY
 
-# Finalize the (unreleased) CHANGELOG entry for this version.
+# Finalize the CHANGELOG entry for this version: fill in the version and date where the
+# version-independent "{{UNRELEASED}}" sentinel was.
 pdm run python - "$PROD_VERSION" "$TMP/CHANGELOG.md" <<'PY'
-import datetime, re, sys
+import datetime, sys
 version, path = sys.argv[1], sys.argv[2]
 with open(path) as f:
     text = f.read()
 date = datetime.date.today().isoformat()
-updated = text.replace(f"## {version} (unreleased)", f"## {version} ({date})")
+updated = text.replace("## {{UNRELEASED}}", f"## {version} ({date})")
 if updated == text:
-    print(f"warning: no '## {version} (unreleased)' entry found in CHANGELOG.md", file=sys.stderr)
+    print("warning: no '## {{UNRELEASED}}' entry found in CHANGELOG.md", file=sys.stderr)
 with open(path, "w") as f:
     f.write(updated)
 PY
