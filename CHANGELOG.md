@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## {{UNRELEASED}}
+## 3.2.2 (2026-07-21)
 
 ### Fixed
 
@@ -15,7 +15,7 @@
 *(Release tooling only -- no effect on the published package.)*
 
 - `CHANGELOG.md`'s "in progress" heading is now the version-independent sentinel
-  `## {{UNRELEASED}}`, filled in with the actual version and date only when `cut-prod` promotes a
+  `## 3.2.2 (2026-07-21)`, filled in with the actual version and date only when `cut-prod` promotes a
   release. Previously the heading had to be hand-typed with the target version number
   (`## X.Y.Z (unreleased)`), which could -- and did, since 3.0.0 -- drift out of sync with
   `pyproject.toml`'s, causing `cut-rc` to insert a duplicate, never-filled-in placeholder entry
