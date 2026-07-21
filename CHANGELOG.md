@@ -16,7 +16,10 @@
 - `cut-prod` now refuses to promote a release if `CHANGELOG.md`'s entry still has `cut-rc`'s
   placeholder text (`- _Add release notes here._`) -- that text should never end up in the
   permanent, published record. `cut-rc` warns about the same thing but doesn't block, since an rc
-  is disposable and only reaches TestPyPI.
+  is disposable and only reaches TestPyPI. (Fixed a false positive in this same check almost
+  immediately: it originally searched the whole file for that string, so it tripped on this very
+  changelog entry quoting the placeholder as documentation. Now it checks whether the unreleased
+  section's own body is *exactly* the placeholder, not just whether the string appears anywhere.)
 
 ## 3.2.2 (2026-07-21)
 
