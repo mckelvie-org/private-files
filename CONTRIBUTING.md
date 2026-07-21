@@ -118,10 +118,19 @@ release actually happens, so there's no version string here that can ever drift 
   a placeholder (`- _Add release notes here._`) so a release never goes out with zero changelog
   entry -- but you should normally have already written the real one yourself before cutting.
 - `cut-prod` rewrites that heading to `## X.Y.Z (<date>)` (filling in both the version it's
-  promoting and today's date), finalizing it, when promoting an rc.
-- The `Publish` workflow triggered by `cut-prod` mirrors that same rewrite back onto `main` itself
-  as part of its post-release sync (see below), so `main`'s copy doesn't stay stuck reading
-  `{{UNRELEASED}}` forever once the release has actually shipped.
+  promoting and today's date), finalizing it, when promoting an rc. This happens on the frozen
+  release commit only -- it's a historical record of exactly what shipped, so it doesn't add
+  anything beyond that.
+- The `Publish` workflow triggered by `cut-prod` mirrors that same finalization back onto `main`
+  itself as part of its post-release sync (see below), so `main`'s copy doesn't stay stuck reading
+  `{{UNRELEASED}}` forever once the release has actually shipped -- and, unlike `cut-prod`, it also
+  leaves a fresh, empty `## {{UNRELEASED}}` heading in place on `main`, ready for the next round of
+  notes, so you never have to remember to re-add it yourself.
+
+If you never replace `cut-rc`'s placeholder (`- _Add release notes here._`) with real notes,
+`cut-rc` warns but still lets the rc through (it's disposable and only reaches TestPyPI), while
+`cut-prod` **refuses to promote** -- that text should never end up in the permanent, published
+`CHANGELOG.md`.
 
 You're free to revise the entry and cut additional rc's as many times as you like -- each `cut-rc`
 re-snapshots whatever `main` currently looks like -- just make sure the changelog reflects what you
@@ -183,8 +192,9 @@ matters to you.
 Strips the rc qualifier, commits to a worktree, tags the commit `v<x.y.z>`, and pushes the tag —
 triggering `Publish`, which (like `Publish TestPyPI`) polls PyPI until the version is actually
 visible before reporting success, updates `prod-latest`, and then syncs `main`: finalizes
-`CHANGELOG.md`'s `## {{UNRELEASED}}` entry to `## X.Y.Z (<date>)` if `main` still has one, and
-ensures `main` carries a dev version strictly ahead of the one just published, bumping
+`CHANGELOG.md`'s `## {{UNRELEASED}}` entry to `## X.Y.Z (<date>)` if `main` still has one (leaving a
+fresh `## {{UNRELEASED}}` heading in its place, ready for the next round of notes), and ensures
+`main` carries a dev version strictly ahead of the one just published, bumping
 to `X.Y.(Z+1)-dev.1` if needed. Either, both, or neither may apply on a given run -- e.g. `cut-rc`
 already bumped `main` itself, or a concurrent release already synced the changelog. This is safe
 with other developers landing commits on `main`, or another release racing to sync it at the same

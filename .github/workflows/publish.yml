@@ -134,19 +134,24 @@ jobs:
               sys.exit(f"Cannot parse prod version: {prod!r}")
           px, py_, pz = int(pm.group(1)), int(pm.group(2)), int(pm.group(3))
 
-          # --- CHANGELOG.md: fill in the version/date where the "{{UNRELEASED}}" sentinel was ---
+          # --- CHANGELOG.md: finalize the "{{UNRELEASED}}" entry, and leave a fresh sentinel in
+          # its place so main is always ready for the next round of notes. Inserting the dated
+          # heading right after the sentinel (rather than replacing it) achieves both in one
+          # step: whatever notes were already written under the sentinel end up under the new
+          # dated heading (since they were already positioned right below it), while the sentinel
+          # itself is left behind, now heading an empty section.
           changelog_path = "CHANGELOG.md"
           with open(changelog_path) as f:
               changelog_text = f.read()
-          old_heading = "## {{UNRELEASED}}"
-          if old_heading in changelog_text:
+          sentinel = "## {{UNRELEASED}}"
+          if sentinel in changelog_text:
               date = datetime.date.today().isoformat()
-              new_heading = f"## {prod} ({date})"
+              dated_heading = f"## {prod} ({date})"
               with open(changelog_path, "w") as f:
-                  f.write(changelog_text.replace(old_heading, new_heading))
-              print(f"Finalized CHANGELOG.md entry for {prod}", file=sys.stderr)
+                  f.write(changelog_text.replace(sentinel, f"{sentinel}\n\n{dated_heading}", 1))
+              print(f"Finalized CHANGELOG.md entry for {prod}, left a fresh {sentinel} in place", file=sys.stderr)
           else:
-              print(f"No {old_heading!r} entry in CHANGELOG.md on main -- nothing to finalize there", file=sys.stderr)
+              print(f"No {sentinel!r} entry in CHANGELOG.md on main -- nothing to finalize there", file=sys.stderr)
 
           # --- pyproject.toml: ensure main's dev version is strictly ahead of the published version ---
           with open("pyproject.toml", "rb") as f:

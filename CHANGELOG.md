@@ -1,5 +1,23 @@
 # CHANGELOG
 
+## {{UNRELEASED}}
+
+### Meta
+
+*(Release tooling only -- no effect on the published package.)*
+
+- `publish.yml`'s post-release sync now also leaves a fresh, empty `## {{UNRELEASED}}` heading on
+  `main` in the same commit that finalizes the just-shipped one -- previously, after a release,
+  `main` had no `{{UNRELEASED}}` section at all until someone remembered to add one back by hand.
+  `cut-prod` itself (on the frozen release commit) is unaffected -- it stays a clean historical
+  record of exactly what shipped, with no forward-looking placeholder added to it.
+- `pypi-template`'s `CHANGELOG.md` stub now comes prepopulated with `## {{UNRELEASED}}` (and
+  `cut-rc`'s placeholder text), so new projects start out already conforming to the convention.
+- `cut-prod` now refuses to promote a release if `CHANGELOG.md`'s entry still has `cut-rc`'s
+  placeholder text (`- _Add release notes here._`) -- that text should never end up in the
+  permanent, published record. `cut-rc` warns about the same thing but doesn't block, since an rc
+  is disposable and only reaches TestPyPI.
+
 ## 3.2.2 (2026-07-21)
 
 ### Fixed

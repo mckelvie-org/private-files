@@ -138,6 +138,11 @@ if header not in text:
     text = re.sub(r"^(# CHANGELOG\n+)", rf"\1{entry}", text)
     with open(path, "w") as f:
         f.write(text)
+# Non-blocking: an rc is disposable/iterative and only reaches TestPyPI, not the permanent
+# record, so this is just an early heads-up -- cut-prod hard-blocks on the same thing later.
+if "_Add release notes here._" in text:
+    print("warning: CHANGELOG.md still has the placeholder '_Add release notes here._' -- "
+          "write real release notes before cutting a production release.", file=sys.stderr)
 PY
 
 git -C "$TMP" add pyproject.toml CHANGELOG.md README.md

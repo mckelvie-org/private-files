@@ -180,7 +180,9 @@ with open(readme_path, "w") as f:
 PY
 
 # Finalize the CHANGELOG entry for this version: fill in the version and date where the
-# version-independent "{{UNRELEASED}}" sentinel was.
+# version-independent "{{UNRELEASED}}" sentinel was. Refuses to promote if the entry still has
+# cut-rc's own placeholder text -- that would mean no one ever wrote real release notes, and
+# unlike a TestPyPI-only rc, this is the permanent, published record.
 pdm run python - "$PROD_VERSION" "$TMP/CHANGELOG.md" <<'PY'
 import datetime, sys
 version, path = sys.argv[1], sys.argv[2]
@@ -190,6 +192,11 @@ date = datetime.date.today().isoformat()
 updated = text.replace("## {{UNRELEASED}}", f"## {version} ({date})")
 if updated == text:
     print("warning: no '## {{UNRELEASED}}' entry found in CHANGELOG.md", file=sys.stderr)
+elif "_Add release notes here._" in updated:
+    sys.exit(
+        "error: CHANGELOG.md still has the placeholder '_Add release notes here._' -- "
+        "write real release notes before cutting a production release."
+    )
 with open(path, "w") as f:
     f.write(updated)
 PY
