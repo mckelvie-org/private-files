@@ -2,6 +2,17 @@
 
 ## {{UNRELEASED}}
 
+### Meta
+
+*(Release tooling only -- no effect on the published package.)*
+
+- `publish.yml`'s post-release sync now seeds the fresh `## {{UNRELEASED}}` heading it leaves on
+  `main` with `cut-rc`'s own placeholder body (`- _Add release notes here._`), not an empty
+  section. An empty body silently defeated the "still just the placeholder" guard added moments
+  earlier -- that guard checks whether the section body is *exactly* the placeholder text, and
+  "nothing at all" doesn't match either, so a completely note-less release could have shipped with
+  no warning at all. Caught in the very first real release cut with the new automation.
+
 ## 3.2.4 (2026-07-21)
 
 ### Meta
