@@ -2,6 +2,8 @@
 
 ## {{UNRELEASED}}
 
+## 3.2.4 (2026-07-21)
+
 ### Meta
 
 *(Release tooling only -- no effect on the published package.)*
